@@ -33,6 +33,9 @@ object Native {
     /** Очистить накопленные сэмплы (при паузе/возобновлении, чтобы не играть устаревшее). */
     external fun clearAudio()
 
+    /** Текущий уровень кольца аудио (в стерео-сэмплах int16) — для дрейф-коррекции такта. */
+    external fun audioLevel(): Int
+
     external fun avFps(): Double
     external fun avSampleRate(): Double
 

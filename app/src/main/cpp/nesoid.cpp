@@ -76,7 +76,7 @@ static std::atomic<uint32_t> g_input[2] = {{0}, {0}};
 // Звуковой кольцевой буфер (int16, стерео-чередование)
 static std::vector<int16_t> g_audio;
 static std::mutex g_audio_mtx;
-static const size_t AUDIO_CAP = 48000 * 2; // ~2 сек, защита от переполнения
+static const size_t AUDIO_CAP = 48000 * 2; // ~1 сек стерео, защита от переполнения
 
 // Читы: тройки [addr, value, cmp]; cmp = -1 -> сравнения нет
 static std::vector<int32_t> g_cheats;
@@ -368,6 +368,12 @@ JNIEXPORT void JNICALL
 Java_com_dendybox_app_Native_clearAudio(JNIEnv* /*env*/, jobject /*thiz*/) {
     std::lock_guard<std::mutex> lock(g_audio_mtx);
     g_audio.clear();
+}
+
+JNIEXPORT jint JNICALL
+Java_com_dendybox_app_Native_audioLevel(JNIEnv* /*env*/, jobject /*thiz*/) {
+    std::lock_guard<std::mutex> lock(g_audio_mtx);
+    return static_cast<jint>(g_audio.size());
 }
 
 JNIEXPORT jdouble JNICALL

@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -55,24 +56,24 @@ import kotlin.math.sin
  * Спецификация экранной кнопки: id, подпись, офсет относительно ЦЕНТРА группы
  * (в dp, при масштабе 1.0) и базовый размер (dp).
  *
- * Кластер (вид «геймпад Dendy»):
+ * Кластер (вид «геймпад Dendy», сверху вниз):
  *
- *          [B′]      [A′]      <- турбо
+ *          [SEL]    [START]    <- пилюли (верх)
  *       [B]    [•]    [A]      <- основные
- *          [SEL]    [START]    <- пилюли
+ *          [B′]      [A′]      <- турбо (низ)
  *
- * Офсеты подобраны так, чтобы кнопки не пересекались и весь блок влезал
- * в нижнюю часть экрана (под картинкой) в портретной ориентации.
+ * Офсеты подобраны так, чтобы кнопки не пересекались, а весь блок
+ * по умолчанию располагался в правой нижней части экрана.
  */
 data class CtrlSpec(val id: String, val label: String, val dx: Float, val dy: Float, val size: Float)
 
 val SPECS = listOf(
-    CtrlSpec("A", "A", 36f, 4f, 64f),
-    CtrlSpec("B", "B", -36f, 4f, 64f),
-    CtrlSpec("TA", "A′", 36f, -56f, 40f),
-    CtrlSpec("TB", "B′", -36f, -56f, 40f),
-    CtrlSpec("SELECT", "SEL", -30f, 64f, 46f),
-    CtrlSpec("START", "START", 30f, 64f, 46f)
+    CtrlSpec("SELECT", "SEL", -30f, -58f, 46f),
+    CtrlSpec("START", "START", 30f, -58f, 46f),
+    CtrlSpec("B", "B", -36f, 2f, 64f),
+    CtrlSpec("A", "A", 36f, 2f, 64f),
+    CtrlSpec("TB", "B′", -36f, 58f, 40f),
+    CtrlSpec("TA", "A′", 36f, 58f, 40f)
 )
 
 private fun handlePress(id: String, down: Boolean) {
@@ -110,6 +111,29 @@ fun ControlsLayer(
         }
         val halfWpx = with(density) { (halfWdp * g.scale).dp.toPx() }
         val halfHpx = with(density) { (halfHdp * g.scale).dp.toPx() }
+
+        // Фон редактора: перетаскивание в любом пустом месте двигает группу,
+        // щипок двумя пальцами масштабирует. Кнопки перехватывают касания
+        // только на себе, всё состояние читаем свежим внутри колбэка.
+        if (editing) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(store) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            val g = store.group
+                            store.updateGroup(
+                                LayoutStore.Group(
+                                    x = (g.x + pan.x / size.width).coerceIn(0.02f, 0.98f),
+                                    y = (g.y + pan.y / size.height).coerceIn(0.02f, 0.98f),
+                                    scale = (g.scale * zoom)
+                                        .coerceIn(LayoutStore.MIN_SCALE, LayoutStore.MAX_SCALE)
+                                )
+                            )
+                        }
+                    }
+            )
+        }
 
         // Рамка вокруг группы в режиме редактирования — видно, что двигается всё сразу
         if (editing) {
@@ -287,21 +311,22 @@ fun FloatingDPad(enabled: Boolean, onBits: (Int) -> Unit) {
                             val rPx = with(density) { SettingsStore.dpadSize.value.dp.toPx() }
                             val enterR = rPx * 0.32f
                             val exitR = rPx * 0.20f
+
+                            // Если крестовина уже висит на экране (после предыдущего
+                            // касания) и палец попал в её зону — НЕ переносим её:
+                            // это нажатие по существующей крестовине. Перенос центра —
+                            // только касанием вне её зоны.
+                            val reuse = visual.visible &&
+                                (down.position - visual.center).getDistance() <= rPx * 1.25f
+                            if (!reuse) visual.center = down.position
                             visual.visible = true
                             visual.touchActive = true
-                            visual.center = down.position
+                            val center = visual.center
                             var bits = 0
 
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                if (!change.pressed) {
-                                    change.consume()
-                                    break
-                                }
-                                val vec = change.position - down.position
+                            fun evalAt(pos: Offset) {
+                                val vec = pos - center
                                 val dist = vec.getDistance()
-
                                 if (dist < exitR) {
                                     bits = 0
                                 } else if (dist >= enterR) {
@@ -316,7 +341,9 @@ fun FloatingDPad(enabled: Boolean, onBits: (Int) -> Unit) {
                                         }
                                     }
                                 }
+                            }
 
+                            fun applyBits() {
                                 if (bits != visual.bits) {
                                     visual.bits = bits
                                     onBits(bits)
@@ -324,6 +351,22 @@ fun FloatingDPad(enabled: Boolean, onBits: (Int) -> Unit) {
                                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                                     }
                                 }
+                            }
+
+                            // Направление определяется сразу в точке касания —
+                            // без ожидания движения пальца
+                            evalAt(down.position)
+                            applyBits()
+
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) {
+                                    change.consume()
+                                    break
+                                }
+                                evalAt(change.position)
+                                applyBits()
                                 change.consume()
                             }
 

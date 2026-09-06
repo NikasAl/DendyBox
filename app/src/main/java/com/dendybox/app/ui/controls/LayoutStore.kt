@@ -24,7 +24,9 @@ class LayoutStore(private val prefs: SharedPreferences) {
         private set
 
     init {
-        val g = prefs.getString("group", null)
+        // Ключ group_v2: при смене аранжировки SPECS старые сохранённые
+        // позиции несовместимы — сбрасываем на новые дефолты
+        val g = prefs.getString("group_v2", null)
         if (g != null) {
             try {
                 val o = org.json.JSONObject(g)
@@ -60,13 +62,13 @@ class LayoutStore(private val prefs: SharedPreferences) {
             .put("x", group.x.toDouble())
             .put("y", group.y.toDouble())
             .put("s", group.scale.toDouble())
-        prefs.edit().putString("group", o.toString()).apply()
+        prefs.edit().putString("group_v2", o.toString()).apply()
     }
 
     companion object {
-        // Дефолт: правый нижний угол, под игровой картинкой (в портретной ориентации)
+        // Дефолт: правый нижний угол, чуть выше низа экрана
         const val DEF_X = 0.78f
-        const val DEF_Y = 0.80f
+        const val DEF_Y = 0.74f
         const val DEF_SCALE = 1.0f
         const val MIN_SCALE = 0.55f
         const val MAX_SCALE = 1.8f

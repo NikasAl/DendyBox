@@ -10,6 +10,7 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.SurfaceHolder
 import android.widget.Toast
 import com.dendybox.app.Native
@@ -46,8 +47,16 @@ class EmulatorEngine(private val context: Context) {
     private var frameW = 256
     private var frameH = 240
 
-    private var audioTrack: AudioTrack? = null
+    @Volatile private var audioTrack: AudioTrack? = null
     private var audioBuf: ByteBuffer? = null
+    private var audioThread: Thread? = null
+    @Volatile private var audioRunning = false
+    @Volatile private var underruns = 0L
+    // Полоса уровня кольца (в стерео-сэмплах int16): ниже — гоним кадры без сна,
+    // выше — притормаживаем; внутри — такт по таймеру с дрейф-коррекцией
+    @Volatile private var ringLow = 0
+    @Volatile private var ringHigh = 0
+
     private var fps = 60.0988
     @Volatile private var frameIndex = 0L
 
@@ -104,22 +113,10 @@ class EmulatorEngine(private val context: Context) {
     /** Пауза; при уходе в паузу автоматически пишется автосейв. */
     fun setPaused(p: Boolean) {
         if (p == paused) return
-        if (p) {
-            paused = true
-            // Выполняется в потоке эмуляции (когда он выйдет из blocking write):
-            // глушим дорожку, сбрасываем несыгранное и накопленное, пишем автосейв.
-            runOnLoop {
-                saveInternal(SaveManager.AUTO)
-                try {
-                    audioTrack?.pause()
-                    audioTrack?.flush()
-                } catch (_: Exception) {}
-                Native.clearAudio()
-            }
-        } else {
-            paused = false
-            // Цикл сам возобновит дорожку перед записью (см. ensurePlaying ниже)
-        }
+        paused = p
+        if (p) runOnLoop { saveInternal(SaveManager.AUTO) }
+        // Паузу/флаш звуковой дорожки выполняет сам аудиопоток (см. audioLoop) —
+        // он же единственный писатель, так что состояние AudioTrack не гонится
     }
 
     fun isPaused(): Boolean = paused
@@ -160,13 +157,17 @@ class EmulatorEngine(private val context: Context) {
 
     fun stop() {
         running = false
-        loopThread?.let { t ->
-            try { t.join(2000) } catch (_: InterruptedException) {}
-        }
+        audioRunning = false
+        // Если аудиопоток застрял в blocking write — возобновляем дорожку,
+        // чтобы join не повис: играющая дорожка потребляет буфер и write завершится
+        try { audioTrack?.play() } catch (_: Exception) {}
+        loopThread?.let { t -> try { t.join(2000) } catch (_: InterruptedException) {} }
         loopThread = null
+        audioThread?.let { t -> try { t.join(2000) } catch (_: InterruptedException) {} }
+        audioThread = null
         try { audioTrack?.pause() } catch (_: Exception) {}
         try { audioTrack?.stop() } catch (_: Exception) {}
-        audioTrack?.release()
+        try { audioTrack?.release() } catch (_: Exception) {}
         audioTrack = null
         Native.unload()
     }
@@ -175,7 +176,9 @@ class EmulatorEngine(private val context: Context) {
 
     private fun loop() {
         val paint = Paint().apply { isFilterBitmap = true }
+        val frameNs = (1e9 / fps).toLong()
         var nextNs = System.nanoTime()
+        var emptyRing = 0
         while (running) {
             ops.poll()?.run()
 
@@ -193,29 +196,6 @@ class EmulatorEngine(private val context: Context) {
             Native.setInput(InputState.compose(frameIndex, fps), 0)
             Native.runFrame()
 
-            // ЗВУК — МАСТЕР-ТАКТ: AudioTrack потребляет сэмплы строго в реальном
-            // времени, поэтому WRITE_BLOCKING сам выравнивает цикл кадров по реальным
-            // часам устройства. Прежний вариант (sleep по 1/fps + блокирующая запись
-            // одновременно) давал двойной такт: часы расстраивались друг о друга,
-            // буфер то переполнялся, то опустошал — отсюда «жёваный» звук.
-            var fedAudio = false
-            audioTrack?.let { t ->
-                // Подстраховка от гонки при возобновлении из паузы: дорожка обязана играть
-                if (t.playState != AudioTrack.PLAYSTATE_PLAYING) {
-                    try { t.play() } catch (_: Exception) {}
-                }
-                audioBuf?.let { ab ->
-                    ab.clear()
-                    val n = Native.drainAudio(ab)
-                    if (n > 0) {
-                        ab.position(0)
-                        ab.limit(n * 2)
-                        t.write(ab, n * 2, AudioTrack.WRITE_BLOCKING)
-                        fedAudio = true
-                    }
-                }
-            }
-
             frameBitmap?.let { bmp ->
                 frameBuffer?.let { fb ->
                     fb.rewind()
@@ -225,16 +205,24 @@ class EmulatorEngine(private val context: Context) {
             }
             frameIndex++
 
-            // Запасной такт по таймеру — только если ядро не выдало аудио
-            // за кадр (звук выключен в ядре / дорожка не создалась)
-            if (!fedAudio) {
-                nextNs += (1e9 / fps).toLong()
-                val now = System.nanoTime()
-                if (nextNs > now) {
-                    sleepQuiet((nextNs - now) / 1_000_000)
-                } else {
-                    nextNs = now
-                }
+            // --- ТАКТ КАДРОВ ---
+            // Звук генерируется ядром покадрово и уходит в аудиопоток; уровень
+            // кольца — точная мера расхождения наших часов и часов ЦАП.
+            // Держим кольцо в полосе [ringLow..ringHigh]: ниже — не спим (догоняем),
+            // выше — притормаживаем. Это гасит и дрейф, и любое «забегание» вперёд.
+            nextNs += frameNs
+            val now = System.nanoTime()
+            if (nextNs < now) nextNs = now // не копим долг
+            val ring = Native.audioLevel()
+            emptyRing = if (ring == 0) emptyRing + 1 else 0
+            when {
+                audioTrack == null || emptyRing > 120 ->
+                    // Звука нет вовсе — запасной такт по таймеру
+                    if (nextNs > now) sleepQuiet((nextNs - now) / 1_000_000)
+                ring < ringLow -> {} // отстаём от звуковых часов — не спим
+                ring > ringHigh -> sleepQuiet(3) // забегаем — чуть притормозим
+                nextNs > now -> sleepQuiet((nextNs - now) / 1_000_000)
+                else -> {}
             }
         }
     }
@@ -247,6 +235,8 @@ class EmulatorEngine(private val context: Context) {
             val vh = c.height.toFloat()
             val s0 = min(vw / frameW, vh / frameH)
             val scale = if (s0 >= 1f) floor(s0) else s0 // целое масштабирование без «мыла»
+            // При целом масштабе рисуем без фильтра: чётче картинка и дешевле отрисовка
+            paint.isFilterBitmap = scale != floor(scale)
             val w = frameW * scale
             val hh = frameH * scale
             val l = (vw - w) / 2f
@@ -261,8 +251,8 @@ class EmulatorEngine(private val context: Context) {
         val rate = Native.avSampleRate().toInt().coerceIn(8000, 96000)
         val ch = AudioFormat.CHANNEL_OUT_STEREO
         val minBuf = AudioTrack.getMinBufferSize(rate, ch, AudioFormat.ENCODING_PCM_16BIT)
-        // ~170 мс: запас от микрозадержек (GC, отрисовка) без ощутимой задержки
-        val bufSize = maxOf(minBuf, rate / 6 * 4)
+        // Буфер устройства ~83 мс: основной запас живёт в кольце перед аудиопотоком
+        val bufSize = maxOf(minBuf, rate / 12 * 4)
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -280,8 +270,67 @@ class EmulatorEngine(private val context: Context) {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .setBufferSizeInBytes(bufSize)
             .build()
+        // Полоса уровня кольца: 30..150 мс (в стерео-сэмплах int16)
+        ringLow = rate * 60 / 1000
+        ringHigh = rate * 300 / 1000
         audioTrack?.play()
-        audioBuf = ByteBuffer.allocateDirect(rate / 15 * 4).order(ByteOrder.LITTLE_ENDIAN)
+        // Буфер слива: до 40 мс за одну запись
+        audioBuf = ByteBuffer.allocateDirect(rate / 25 * 4).order(ByteOrder.LITTLE_ENDIAN)
+        audioRunning = true
+        audioThread = thread(name = "emu-audio", isDaemon = true) { audioLoop() }
+    }
+
+    /**
+     * Отдельный аудиопоток — единственный писатель в AudioTrack.
+     * Кольцо между ядром и дорожкой держит запас ~100 мс, поэтому микрофризы
+     * эмуляции и отрисовки больше не голодают дорожку. Если кольцо пусто —
+     * подкладываем короткую тишину: устройство продолжает потреблять данные
+     * и НЕ зацикливает старое содержимое своего буфера (тот самый «эффект эха»,
+     * когда AudioTrack при недогрузке многократно проигрывает остаток буфера).
+     */
+    private fun audioLoop() {
+        val sr = audioTrack?.sampleRate ?: 48000
+        val silence = ShortArray(sr / 200 * 2) // ~5 мс тишины
+        val ab = audioBuf
+        var lastLogNs = System.nanoTime()
+        try {
+            while (audioRunning) {
+                val t = audioTrack ?: break
+                if (paused) {
+                    if (t.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                        try { t.pause(); t.flush() } catch (_: Exception) {}
+                        Native.clearAudio()
+                    }
+                    sleepQuiet(15)
+                    continue
+                }
+                if (t.playState != AudioTrack.PLAYSTATE_PLAYING) {
+                    try { t.play() } catch (_: Exception) {}
+                }
+                var n = 0
+                if (ab != null) {
+                    ab.clear()
+                    n = Native.drainAudio(ab)
+                    if (n > 0) {
+                        ab.position(0)
+                        ab.limit(n * 2)
+                        t.write(ab, n * 2, AudioTrack.WRITE_BLOCKING)
+                    }
+                }
+                if (n == 0) {
+                    underruns++
+                    t.write(silence, 0, silence.size)
+                    sleepQuiet(2)
+                }
+                val nowNs = System.nanoTime()
+                if (nowNs - lastLogNs >= 15_000_000_000L) {
+                    lastLogNs = nowNs
+                    Log.i("DendyBox", "audio: ring=${Native.audioLevel()} underruns=$underruns")
+                }
+            }
+        } catch (_: Throwable) {
+            // дорожка освобождена при stop() — тихо выходим
+        }
     }
 
     /** Выполняется только в потоке эмуляции. */

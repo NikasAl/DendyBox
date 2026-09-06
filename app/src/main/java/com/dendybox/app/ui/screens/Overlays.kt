@@ -309,15 +309,16 @@ fun EditBar(
     val group = store.group
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+            Text("Редактор раскладки", style = MaterialTheme.typography.titleMedium)
             Text(
-                text = "Тяните любую кнопку — перемещается вся группа. " +
-                    "Слайдер масштабирует все кнопки сразу.",
-                style = MaterialTheme.typography.bodySmall
-            )
-            Text(
-                text = "Размер блока: %d%%".format((group.scale * 100).toInt()),
+                text = "Тяните пустое место или любую кнопку — весь блок сдвинется целиком. " +
+                    "Щипок двумя пальцами или слайдер — масштаб блока.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Масштаб кнопок: %d%%".format((group.scale * 100).toInt()),
+                style = MaterialTheme.typography.bodyMedium
             )
             Slider(
                 value = group.scale,
