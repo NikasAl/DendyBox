@@ -17,10 +17,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -33,7 +37,8 @@ import com.dendybox.app.emulator.EmulatorEngine
 import com.dendybox.app.input.InputState
 import com.dendybox.app.saves.SaveManager
 import com.dendybox.app.ui.controls.ControlsLayer
-import com.dendybox.app.ui.controls.FloatingDPad
+import com.dendybox.app.ui.controls.DpadLayer
+import com.dendybox.app.ui.controls.EditorSurface
 import com.dendybox.app.ui.controls.LayoutStore
 
 enum class Screen { GAME, PAUSE, SLOTS, CHEATS, SETTINGS, EDIT }
@@ -55,6 +60,9 @@ fun GameScreen(
         LayoutStore(context.getSharedPreferences("layout", Context.MODE_PRIVATE))
     }
     val editing = screen == Screen.EDIT
+
+    // Какой блок редактируется (выделяется касанием, масштаб — слайдером/щипком)
+    var editTarget by remember { mutableStateOf(LayoutStore.GroupId.DPAD) }
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
 
@@ -89,6 +97,7 @@ fun GameScreen(
             ) {
                 CircleIcon(Icons.Filled.Pause, "Пауза") { onScreen(Screen.PAUSE) }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CircleIcon(Icons.Filled.Tune, "Настройки управления") { onScreen(Screen.EDIT) }
                     CircleIcon(Icons.Filled.Save, "Квик-сейв") {
                         engine.saveSlot(SaveManager.QUICK) { ok ->
                             toast(if (ok) "Сохранено" else "Ошибка сохранения")
@@ -102,13 +111,34 @@ fun GameScreen(
                 }
             }
 
-            FloatingDPad(enabled = true, onBits = { InputState.setDirs(it) })
+            // Крестовина: всегда видима на фиксированном месте
+            DpadLayer(
+                store = layoutStore,
+                editing = false,
+                enabled = true,
+                onBits = { InputState.setDirs(it) }
+            )
             ControlsLayer(store = layoutStore, editing = false)
         }
 
-        // Режим редактирования раскладки: игра на паузе, двигается вся группа кнопок
+        // Редактор управления: игра на паузе; тяните блок или пустое место —
+        // двигается выделенный блок; щипок/слайдер — масштаб
         if (started && editing) {
-            ControlsLayer(store = layoutStore, editing = true)
+            EditorSurface(store = layoutStore, selected = editTarget)
+            DpadLayer(
+                store = layoutStore,
+                editing = true,
+                selected = editTarget,
+                onSelect = { editTarget = LayoutStore.GroupId.DPAD },
+                enabled = false,
+                onBits = {}
+            )
+            ControlsLayer(
+                store = layoutStore,
+                editing = true,
+                selected = editTarget,
+                onSelect = { editTarget = it }
+            )
             Box(
                 Modifier
                     .align(Alignment.BottomCenter)
@@ -116,6 +146,8 @@ fun GameScreen(
             ) {
                 EditBar(
                     store = layoutStore,
+                    selected = editTarget,
+                    onSelectGroup = { editTarget = it },
                     onDone = { onScreen(Screen.GAME) }
                 )
             }

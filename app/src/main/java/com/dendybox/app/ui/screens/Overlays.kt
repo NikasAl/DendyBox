@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.VideogameAsset
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -97,7 +98,7 @@ fun PauseOverlay(
                 }
                 MenuButton("Слоты сохранений", onSlots)
                 MenuButton("Читы", onCheats)
-                MenuButton("Раскладка кнопок", onEdit)
+                MenuButton("Настройки управления", onEdit)
                 MenuButton("Настройки", onSettings)
                 OutlinedButton(onClick = onExit, modifier = Modifier.fillMaxWidth()) {
                     Text("Выход из игры")
@@ -298,36 +299,47 @@ private fun SettingSwitch(label: String, value: Boolean, onChange: (Boolean) -> 
 }
 
 // ---------------------------------------------------------------------------
-// Панель редактирования раскладки
+// Панель редактора управления: выбор блока, масштаб выделенного блока, сброс
 // ---------------------------------------------------------------------------
 
 @Composable
 fun EditBar(
     store: LayoutStore,
+    selected: LayoutStore.GroupId,
+    onSelectGroup: (LayoutStore.GroupId) -> Unit,
     onDone: () -> Unit
 ) {
-    val group = store.group
+    val g = store.group(selected)
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
-            Text("Редактор раскладки", style = MaterialTheme.typography.titleMedium)
+            Text("Настройки управления", style = MaterialTheme.typography.titleMedium)
             Text(
-                text = "Тяните пустое место или любую кнопку — весь блок сдвинется целиком. " +
-                    "Щипок двумя пальцами или слайдер — масштаб блока.",
+                text = "Тяните блок или пустое место — двигается выделенный блок. " +
+                    "Щипок двумя пальцами или слайдер — масштаб.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LayoutStore.GroupId.entries.forEach { gid ->
+                    FilterChip(
+                        selected = gid == selected,
+                        onClick = { onSelectGroup(gid) },
+                        label = { Text(LayoutStore.title(gid)) }
+                    )
+                }
+            }
             Text(
-                text = "Масштаб кнопок: %d%%".format((group.scale * 100).toInt()),
+                text = "Масштаб «%s»: %d%%".format(LayoutStore.title(selected), (g.scale * 100).toInt()),
                 style = MaterialTheme.typography.bodyMedium
             )
             Slider(
-                value = group.scale,
+                value = g.scale,
                 valueRange = LayoutStore.MIN_SCALE..LayoutStore.MAX_SCALE,
-                onValueChange = { store.updateGroup(group.copy(scale = it)) }
+                onValueChange = { store.updateGroup(selected, g.copy(scale = it)) }
             )
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = { store.reset() }, modifier = Modifier.weight(1f)) {
-                    Text("Сбросить раскладку")
+                OutlinedButton(onClick = { store.resetAll() }, modifier = Modifier.weight(1f)) {
+                    Text("Сбросить всё")
                 }
                 Button(onClick = onDone, modifier = Modifier.weight(1f)) {
                     Text("Готово")
