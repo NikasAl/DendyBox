@@ -2,6 +2,7 @@ package com.dendybox.app.ui.screens
 
 import android.content.Context
 import android.view.SurfaceHolder
+import android.view.SurfaceView
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement

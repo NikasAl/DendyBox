@@ -155,6 +155,7 @@ static void input_poll_cb() {
 }
 
 static int16_t input_state_cb(unsigned port, unsigned device, unsigned index, unsigned id) {
+    (void)index; // индекс аналоговой оси не используется (только цифровой joypad)
     if (device != RETRO_DEVICE_JOYPAD || port > 1 || id > 15) return 0;
     return static_cast<int16_t>((g_input[port].load(std::memory_order_relaxed) >> id) & 1u);
 }

@@ -74,9 +74,10 @@ class EmulatorEngine(private val context: Context) {
         frameW = dims[0]
         frameH = dims[1]
 
-        frameBuffer = ByteBuffer.allocateDirect(frameW * frameH * 2)
+        val fb = ByteBuffer.allocateDirect(frameW * frameH * 2)
             .order(ByteOrder.LITTLE_ENDIAN)
-        Native.setPixelBuffer(frameBuffer)
+        frameBuffer = fb
+        Native.setPixelBuffer(fb)
         frameBitmap = Bitmap.createBitmap(frameW, frameH, Bitmap.Config.RGB_565)
 
         setupAudio()
@@ -136,7 +137,9 @@ class EmulatorEngine(private val context: Context) {
     }
 
     fun setSound(on: Boolean) {
-        main.post { audioTrack?.volume = if (on) 1f else 0f }
+        // AudioTrack имеет только setVolume(float) без геттера —
+        // property-синтаксис «volume = …» в Kotlin недоступен.
+        main.post { audioTrack?.setVolume(if (on) 1f else 0f) }
     }
 
     fun stop() {

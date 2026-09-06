@@ -4,6 +4,7 @@
 local.properties
 build/
 app/build/
+app/.cxx/
 # Ядро эмулятора скачивается скриптом scripts/build_core_fceumm.sh
 app/src/main/jniLibs/**/*.so
 # ROM не хранится в репозитории
