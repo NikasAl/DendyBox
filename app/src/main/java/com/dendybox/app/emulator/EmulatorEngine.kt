@@ -65,7 +65,9 @@ class EmulatorEngine(private val context: Context) {
                 "(см. README.md, раздел «Шаг 2. Ядро эмулятора»)."
         }
         if (!Native.loadRom(rom)) {
-            return "ROM не удалось загрузить — файл повреждён или это не iNES-образ (.nes)."
+            return "ROM не удалось загрузить.\n\n" +
+                "Проверьте файл: ./scripts/check_rom.sh app/src/main/assets/rom.nes\n" +
+                "Подробная причина — в logcat по тегу «DendyBox» (./scripts/run.sh log)."
         }
 
         saves = SaveManager(context, SaveManager.sha1(rom))

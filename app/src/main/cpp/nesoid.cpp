@@ -9,10 +9,12 @@
 
 #include <jni.h>
 #include <dlfcn.h>
+#include <android/log.h>
 
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -25,6 +27,7 @@
 // ---------------------------------------------------------------------------
 
 static void* g_core = nullptr; // handle dlopen
+static std::string g_rom_path = "rom.nes"; // имя ROM: ядро по нему определяет регион и расширение
 
 static void (*f_set_environment)(retro_environment_t) = nullptr;
 static void (*f_set_video_refresh)(retro_video_refresh_t) = nullptr;
@@ -87,6 +90,27 @@ static size_t g_ram_size = 0;
 // Колбэки для ядра
 // ---------------------------------------------------------------------------
 
+// Лог ядра -> logcat (тег DendyBox): сюда попадают и ошибки загрузки ROM
+// от самого FCEUmm («Not an iNES file!», «mapper is not supported» и т.п.).
+static void core_log(enum retro_log_level level, const char* fmt, ...) {
+    static const android_LogPriority prio[] = {
+        ANDROID_LOG_DEBUG, ANDROID_LOG_INFO, ANDROID_LOG_WARN, ANDROID_LOG_ERROR
+    };
+    char line[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    __android_log_print(level < 4 ? prio[level] : ANDROID_LOG_INFO,
+                        "DendyBox", "%s", line);
+}
+
+// Расширенная инфа о контенте для ядра. Ночные сборки FCEUmm берут ROM
+// ТОЛЬКО отсюда (fallback по retro_game_info::data в ядре потерян —
+// он пытается открыть файл с диска и отвергает ROM из памяти).
+// Вызывается только внутри retro_load_game, g_rom уже заполнен.
+static retro_game_info_ext g_game_info_ext;
+
 static bool env_cb(unsigned cmd, void* data) {
     switch (cmd) {
         case RETRO_ENVIRONMENT_GET_CAN_DUPE:
@@ -119,6 +143,27 @@ static bool env_cb(unsigned cmd, void* data) {
             auto* v = reinterpret_cast<retro_variable*>(data);
             if (v) v->value = nullptr;
             return false;
+        }
+        case RETRO_ENVIRONMENT_GET_LOG_INTERFACE: {
+            auto* cb = reinterpret_cast<retro_log_callback*>(data);
+            if (!cb) return false;
+            cb->log = &core_log;
+            return true;
+        }
+        case RETRO_ENVIRONMENT_GET_GAME_INFO_EXT: {
+            auto* out = reinterpret_cast<const retro_game_info_ext**>(data);
+            if (!out || g_rom.empty()) return false;
+            g_game_info_ext = retro_game_info_ext{};
+            g_game_info_ext.full_path = g_rom_path.c_str();
+            g_game_info_ext.dir = ".";
+            g_game_info_ext.name = "rom";
+            g_game_info_ext.ext = "nes";
+            g_game_info_ext.data = g_rom.data();
+            g_game_info_ext.size = g_rom.size();
+            g_game_info_ext.file_in_archive = false;
+            g_game_info_ext.persistent_data = false;
+            *out = &g_game_info_ext;
+            return true;
         }
         default:
             return false;
@@ -259,7 +304,7 @@ Java_com_dendybox_app_Native_loadRom(JNIEnv* env, jobject /*thiz*/, jbyteArray j
     env->ReleaseByteArrayElements(jrom, elems, JNI_ABORT);
 
     retro_game_info info{};
-    info.path = "rom.nes";       // расширение нужно ядру для определения маппера
+    info.path = g_rom_path.c_str(); // расширение нужно ядру для определения маппера
     info.data = g_rom.data();
     info.size = g_rom.size();
     info.meta = nullptr;
