@@ -1,0 +1,12 @@
+*.iml
+.gradle/
+.idea/
+local.properties
+build/
+app/build/
+# Ядро эмулятора скачивается скриптом scripts/build_core_fceumm.sh
+app/src/main/jniLibs/**/*.so
+# ROM не хранится в репозитории
+app/src/main/assets/rom.nes
+captures/
+.DS_Store
