@@ -1,69 +1,74 @@
 package com.dendybox.app.ui.controls
 
 import android.content.SharedPreferences
-import androidx.compose.runtime.mutableStateMapOf
-import org.json.JSONObject
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 /**
- * Раскладка экранных кнопок: позиции (доли экрана) и размер (dp) для каждого контрола.
- * Хранится в SharedPreferences, изменения сразу применяются и сохраняются.
+ * Раскладка экранных кнопок — ГРУППОВАЯ: весь блок (A, B, турбо, Start/Select)
+ * перемещается и масштабируется как единое целое.
+ *
+ * [Group.x]/[Group.y] — якорь группы (центр кластера) в долях экрана,
+ * [Group.scale] — масштаб всех кнопок (1.0 = базовые размеры из SPECS).
+ * Сами кнопки позиционируются относительно якоря офсетами в dp (CtrlSpec.dx/dy),
+ * умноженными на масштаб.
+ *
+ * Хранится в SharedPreferences, изменения применяются сразу.
  */
 class LayoutStore(private val prefs: SharedPreferences) {
 
-    data class Pos(val x: Float, val y: Float, val size: Float)
+    data class Group(val x: Float, val y: Float, val scale: Float)
 
-    private val map = mutableStateMapOf<String, Pos>()
+    var group: Group by mutableStateOf(Group(DEF_X, DEF_Y, DEF_SCALE))
+        private set
 
     init {
-        prefs.getString("layout", null)?.let { s ->
+        val g = prefs.getString("group", null)
+        if (g != null) {
             try {
-                val o = JSONObject(s)
-                o.keys().forEach { id ->
-                    val p = o.getJSONObject(id)
-                    map[id] = Pos(
-                        x = p.getDouble("x").toFloat(),
-                        y = p.getDouble("y").toFloat(),
-                        size = p.getDouble("s").toFloat()
-                    )
-                }
+                val o = org.json.JSONObject(g)
+                group = Group(
+                    x = o.getDouble("x").toFloat(),
+                    y = o.getDouble("y").toFloat(),
+                    scale = o.getDouble("s").toFloat()
+                )
             } catch (_: Exception) {
-                // повреждённая раскладка — используем значения по умолчанию
+                // повреждённые данные — используем значения по умолчанию
             }
         }
     }
 
-    fun pos(id: String, defX: Float, defY: Float, defSize: Float): Pos =
-        map[id] ?: Pos(defX, defY, defSize)
-
-    fun size(id: String, def: Float): Float = map[id]?.size ?: def
-
-    fun setPos(id: String, p: Pos) {
-        map[id] = p
-        persist()
-    }
-
-    fun setSize(id: String, size: Float) {
-        val p = map[id] ?: return
-        map[id] = p.copy(size = size)
+    /** Обновить группу; координаты зажимаются в допустимые пределы. */
+    fun updateGroup(g: Group) {
+        val s = g.scale.coerceIn(MIN_SCALE, MAX_SCALE)
+        group = Group(
+            x = g.x.coerceIn(0.02f, 0.98f),
+            y = g.y.coerceIn(0.02f, 0.98f),
+            scale = s
+        )
         persist()
     }
 
     fun reset() {
-        map.clear()
+        group = Group(DEF_X, DEF_Y, DEF_SCALE)
         persist()
     }
 
     private fun persist() {
-        val o = JSONObject()
-        map.forEach { (id, p) ->
-            o.put(
-                id,
-                JSONObject()
-                    .put("x", p.x.toDouble())
-                    .put("y", p.y.toDouble())
-                    .put("s", p.size.toDouble())
-            )
-        }
-        prefs.edit().putString("layout", o.toString()).apply()
+        val o = org.json.JSONObject()
+            .put("x", group.x.toDouble())
+            .put("y", group.y.toDouble())
+            .put("s", group.scale.toDouble())
+        prefs.edit().putString("group", o.toString()).apply()
+    }
+
+    companion object {
+        // Дефолт: правый нижний угол, под игровой картинкой (в портретной ориентации)
+        const val DEF_X = 0.78f
+        const val DEF_Y = 0.80f
+        const val DEF_SCALE = 1.0f
+        const val MIN_SCALE = 0.55f
+        const val MAX_SCALE = 1.8f
     }
 }

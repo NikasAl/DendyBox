@@ -104,8 +104,22 @@ class EmulatorEngine(private val context: Context) {
     /** Пауза; при уходе в паузу автоматически пишется автосейв. */
     fun setPaused(p: Boolean) {
         if (p == paused) return
-        if (p) runOnLoop { saveInternal(SaveManager.AUTO) }
-        paused = p
+        if (p) {
+            paused = true
+            // Выполняется в потоке эмуляции (когда он выйдет из blocking write):
+            // глушим дорожку, сбрасываем несыгранное и накопленное, пишем автосейв.
+            runOnLoop {
+                saveInternal(SaveManager.AUTO)
+                try {
+                    audioTrack?.pause()
+                    audioTrack?.flush()
+                } catch (_: Exception) {}
+                Native.clearAudio()
+            }
+        } else {
+            paused = false
+            // Цикл сам возобновит дорожку перед записью (см. ensurePlaying ниже)
+        }
     }
 
     fun isPaused(): Boolean = paused
@@ -166,28 +180,39 @@ class EmulatorEngine(private val context: Context) {
             ops.poll()?.run()
 
             if (paused) {
-                sleepQuiet(30)
-                nextNs = System.nanoTime()
+                sleepQuiet(20)
                 continue
             }
 
             val h = holder
             if (h == null || h.surface == null || !h.surface.isValid) {
-                sleepQuiet(30)
-                nextNs = System.nanoTime()
+                sleepQuiet(20)
                 continue
             }
 
             Native.setInput(InputState.compose(frameIndex, fps), 0)
             Native.runFrame()
 
-            audioBuf?.let { ab ->
-                ab.clear()
-                val n = Native.drainAudio(ab)
-                if (n > 0) {
-                    ab.position(0)
-                    ab.limit(n * 2)
-                    audioTrack?.write(ab, n * 2, AudioTrack.WRITE_BLOCKING)
+            // ЗВУК — МАСТЕР-ТАКТ: AudioTrack потребляет сэмплы строго в реальном
+            // времени, поэтому WRITE_BLOCKING сам выравнивает цикл кадров по реальным
+            // часам устройства. Прежний вариант (sleep по 1/fps + блокирующая запись
+            // одновременно) давал двойной такт: часы расстраивались друг о друга,
+            // буфер то переполнялся, то опустошал — отсюда «жёваный» звук.
+            var fedAudio = false
+            audioTrack?.let { t ->
+                // Подстраховка от гонки при возобновлении из паузы: дорожка обязана играть
+                if (t.playState != AudioTrack.PLAYSTATE_PLAYING) {
+                    try { t.play() } catch (_: Exception) {}
+                }
+                audioBuf?.let { ab ->
+                    ab.clear()
+                    val n = Native.drainAudio(ab)
+                    if (n > 0) {
+                        ab.position(0)
+                        ab.limit(n * 2)
+                        t.write(ab, n * 2, AudioTrack.WRITE_BLOCKING)
+                        fedAudio = true
+                    }
                 }
             }
 
@@ -200,12 +225,16 @@ class EmulatorEngine(private val context: Context) {
             }
             frameIndex++
 
-            nextNs += (1e9 / fps).toLong()
-            val now = System.nanoTime()
-            if (nextNs > now) {
-                sleepQuiet((nextNs - now) / 1_000_000)
-            } else {
-                nextNs = now
+            // Запасной такт по таймеру — только если ядро не выдало аудио
+            // за кадр (звук выключен в ядре / дорожка не создалась)
+            if (!fedAudio) {
+                nextNs += (1e9 / fps).toLong()
+                val now = System.nanoTime()
+                if (nextNs > now) {
+                    sleepQuiet((nextNs - now) / 1_000_000)
+                } else {
+                    nextNs = now
+                }
             }
         }
     }
@@ -232,7 +261,8 @@ class EmulatorEngine(private val context: Context) {
         val rate = Native.avSampleRate().toInt().coerceIn(8000, 96000)
         val ch = AudioFormat.CHANNEL_OUT_STEREO
         val minBuf = AudioTrack.getMinBufferSize(rate, ch, AudioFormat.ENCODING_PCM_16BIT)
-        val bufSize = maxOf(minBuf, rate / 8 * 4) // ~125 мс запаса от потрескивания
+        // ~170 мс: запас от микрозадержек (GC, отрисовка) без ощутимой задержки
+        val bufSize = maxOf(minBuf, rate / 6 * 4)
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()

@@ -17,9 +17,9 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -45,26 +45,35 @@ import androidx.compose.ui.unit.sp
 import com.dendybox.app.input.InputState
 import com.dendybox.app.settings.SettingsStore
 import com.dendybox.app.ui.AccentRed
+import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Спецификация экранной кнопки: id, подпись, позиция по умолчанию (доли экрана) и размер (dp).
+ * Спецификация экранной кнопки: id, подпись, офсет относительно ЦЕНТРА группы
+ * (в dp, при масштабе 1.0) и базовый размер (dp).
+ *
+ * Кластер (вид «геймпад Dendy»):
+ *
+ *          [B′]      [A′]      <- турбо
+ *       [B]    [•]    [A]      <- основные
+ *          [SEL]    [START]    <- пилюли
+ *
+ * Офсеты подобраны так, чтобы кнопки не пересекались и весь блок влезал
+ * в нижнюю часть экрана (под картинкой) в портретной ориентации.
  */
-data class CtrlSpec(val id: String, val label: String, val defX: Float, val defY: Float, val defSize: Float)
+data class CtrlSpec(val id: String, val label: String, val dx: Float, val dy: Float, val size: Float)
 
 val SPECS = listOf(
-    CtrlSpec("B", "B", 0.775f, 0.63f, 62f),
-    CtrlSpec("A", "A", 0.905f, 0.51f, 62f),
-    CtrlSpec("TB", "B′", 0.665f, 0.75f, 40f),
-    CtrlSpec("TA", "A′", 0.795f, 0.64f, 40f),
-    CtrlSpec("SELECT", "SEL", 0.535f, 0.88f, 44f),
-    CtrlSpec("START", "START", 0.660f, 0.88f, 44f)
+    CtrlSpec("A", "A", 36f, 4f, 64f),
+    CtrlSpec("B", "B", -36f, 4f, 64f),
+    CtrlSpec("TA", "A′", 36f, -56f, 40f),
+    CtrlSpec("TB", "B′", -36f, -56f, 40f),
+    CtrlSpec("SELECT", "SEL", -30f, 64f, 46f),
+    CtrlSpec("START", "START", 30f, 64f, 46f)
 )
-
-fun specById(id: String?): CtrlSpec? = SPECS.firstOrNull { it.id == id }
 
 private fun handlePress(id: String, down: Boolean) {
     when (id) {
@@ -78,28 +87,56 @@ private fun handlePress(id: String, down: Boolean) {
 }
 
 // ---------------------------------------------------------------------------
-// Слой кнопок A/B, турбо, Select/Start
+// Слой кнопок A/B, турбо, Select/Start — вся группа двигается и масштабируется
+// как единое целое (LayoutStore.group: якорь + масштаб).
 // ---------------------------------------------------------------------------
 
 @Composable
 fun ControlsLayer(
     store: LayoutStore,
-    editing: Boolean,
-    selectedId: String?,
-    onSelect: (String) -> Unit
+    editing: Boolean
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val parentPx = IntSize(constraints.maxWidth, constraints.maxHeight)
+        val density = LocalDensity.current
+        val g = store.group // чтение state — recomposition при каждом изменении
+
+        // Пиксельные полуразмеры кластера (для рамки в режиме редактирования)
+        var halfWdp = 0f
+        var halfHdp = 0f
+        SPECS.forEach { s ->
+            halfWdp = maxOf(halfWdp, abs(s.dx) + s.size / 2f)
+            halfHdp = maxOf(halfHdp, abs(s.dy) + s.size / 2f)
+        }
+        val halfWpx = with(density) { (halfWdp * g.scale).dp.toPx() }
+        val halfHpx = with(density) { (halfHdp * g.scale).dp.toPx() }
+
+        // Рамка вокруг группы в режиме редактирования — видно, что двигается всё сразу
+        if (editing) {
+            val cx = g.x * parentPx.width
+            val cy = g.y * parentPx.height
+            Box(
+                Modifier
+                    .offset { IntOffset((cx - halfWpx).toInt(), (cy - halfHpx).toInt()) }
+                    .size((halfWpx * 2 / density.density).dp, (halfHpx * 2 / density.density).dp)
+                    .border(1.dp, AccentRed.copy(alpha = 0.7f), RoundedCornerShape(18.dp))
+            )
+        }
+
         SPECS.forEach { spec ->
             key(spec.id) {
+                val sizePx = with(density) { (spec.size * g.scale).dp.toPx() }
+                val x = (g.x * parentPx.width + spec.dx * g.scale * density.density - sizePx / 2f).toInt()
+                val y = (g.y * parentPx.height + spec.dy * g.scale * density.density - sizePx / 2f).toInt()
                 GameButton(
                     spec = spec,
+                    sizeDp = spec.size * g.scale,
+                    xPx = x,
+                    yPx = y,
                     store = store,
                     parentPx = parentPx,
                     editing = editing,
-                    selected = selectedId == spec.id,
-                    onPress = { down -> handlePress(spec.id, down) },
-                    onSelect = { onSelect(spec.id) }
+                    onPress = { down -> handlePress(spec.id, down) }
                 )
             }
         }
@@ -109,37 +146,63 @@ fun ControlsLayer(
 @Composable
 private fun GameButton(
     spec: CtrlSpec,
+    sizeDp: Float,
+    xPx: Int,
+    yPx: Int,
     store: LayoutStore,
     parentPx: IntSize,
     editing: Boolean,
-    selected: Boolean,
-    onPress: (Boolean) -> Unit,
-    onSelect: () -> Unit
+    onPress: (Boolean) -> Unit
 ) {
     val opacity by SettingsStore.controlsOpacity.collectAsState()
-    val pos = store.pos(spec.id, spec.defX, spec.defY, spec.defSize)
-    val density = LocalDensity.current
-    val sizePx = with(density) { pos.size.dp.toPx() }
-    val x = (pos.x * parentPx.width - sizePx / 2f).toInt()
-    val y = (pos.y * parentPx.height - sizePx / 2f).toInt()
+    val isTurbo = spec.id == "TA" || spec.id == "TB"
     val isPill = spec.id == "SELECT" || spec.id == "START"
     val shape = if (isPill) RoundedCornerShape(12.dp) else CircleShape
+    var pressed by remember { mutableStateOf(false) }
+
+    val fillAlpha = when {
+        pressed -> minOf(1f, opacity + 0.3f)
+        isTurbo -> opacity * 0.75f
+        else -> opacity
+    }
+    val borderAlpha = if (isTurbo) 0.35f else 0.55f
 
     Box(
         modifier = Modifier
-            .offset { IntOffset(x, y) }
-            .size(pos.size.dp)
+            .offset { IntOffset(xPx, yPx) }
+            .size(sizeDp.dp)
             .then(
                 if (editing) {
-                    Modifier.pointerInput(spec.id) {
+                    // Редактор: тянем ЛЮБУЮ кнопку — двигается вся группа.
+                    // Всё состояние читаем ВНУТРИ колбэка на момент события:
+                    // pointerInput не пересоздаётся при рекомпозиции, поэтому
+                    // захваченные «на старте» значения устаревают.
+                    // Ключ parentPx — перезапуск жеста при смене размеров экрана.
+                    Modifier.pointerInput(parentPx) {
                         detectDragGestures(
-                            onDragStart = { _ -> onSelect() },
+                            onDragStart = { _ -> },
                             onDrag = { change, dragAmount ->
                                 change.consume()
-                                val cur = store.pos(spec.id, spec.defX, spec.defY, spec.defSize)
-                                val nx = (cur.x + dragAmount.x / parentPx.width).coerceIn(0.03f, 0.97f)
-                                val ny = (cur.y + dragAmount.y / parentPx.height).coerceIn(0.03f, 0.97f)
-                                store.setPos(spec.id, LayoutStore.Pos(nx, ny, cur.size))
+                                val g = store.group
+                                var hw = 0f
+                                var hh = 0f
+                                SPECS.forEach { s ->
+                                    hw = maxOf(hw, abs(s.dx) + s.size / 2f)
+                                    hh = maxOf(hh, abs(s.dy) + s.size / 2f)
+                                }
+                                val halfW = (hw * g.scale).dp.toPx() / parentPx.width
+                                val halfH = (hh * g.scale).dp.toPx() / parentPx.height
+                                val mx = halfW.coerceAtMost(0.5f)
+                                val my = halfH.coerceAtMost(0.5f)
+                                store.updateGroup(
+                                    LayoutStore.Group(
+                                        x = (g.x + dragAmount.x / parentPx.width)
+                                            .coerceIn(mx, (1f - mx).coerceAtLeast(mx)),
+                                        y = (g.y + dragAmount.y / parentPx.height)
+                                            .coerceIn(my, (1f - my).coerceAtLeast(my)),
+                                        scale = g.scale
+                                    )
+                                )
                             }
                         )
                     }
@@ -147,10 +210,12 @@ private fun GameButton(
                     Modifier.pointerInput(spec.id) {
                         detectTapGestures(
                             onPress = {
+                                pressed = true
                                 onPress(true)
                                 try {
                                     awaitRelease()
                                 } finally {
+                                    pressed = false
                                     onPress(false)
                                 }
                             }
@@ -159,15 +224,19 @@ private fun GameButton(
                 }
             )
             .clip(shape)
-            .background(if (selected) AccentRed.copy(alpha = opacity) else Color.White.copy(alpha = opacity))
-            .border(2.dp, Color.White.copy(alpha = 0.55f), shape),
+            .background(Color.White.copy(alpha = fillAlpha))
+            .border(
+                if (isTurbo) 1.dp else 2.dp,
+                if (isTurbo) AccentRed.copy(alpha = borderAlpha) else Color.White.copy(alpha = borderAlpha),
+                shape
+            ),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = spec.label,
             color = Color.White.copy(alpha = 0.9f),
             fontWeight = FontWeight.Bold,
-            fontSize = if (pos.size < 50f) 10.sp else 18.sp
+            fontSize = if (sizeDp < 50f) 10.sp else 18.sp
         )
     }
 }
@@ -178,21 +247,33 @@ private fun GameButton(
 
 private class DpadVisual {
     var visible by mutableStateOf(false)
+    var touchActive by mutableStateOf(false)
     var center by mutableStateOf(Offset.Zero)
     var bits by mutableStateOf(0)
 }
 
 /**
  * Плавающая крестовина: появляется в точке касания левой зоны экрана,
- * 8 направлений (сектора по 45°) с мёртвой зоной и гистерезисом,
- * исчезает при отпускании пальца.
+ * 8 направлений (сектора по 45°) с мёртвой зоной и гистерезисом.
+ * После отпускания пальца остаётся на экране ещё [HIDE_DELAY_MS] мс
+ * и только затем исчезает (направления при этом сбрасываются сразу).
  */
+private const val HIDE_DELAY_MS = 5000L
+
 @Composable
 fun FloatingDPad(enabled: Boolean, onBits: (Int) -> Unit) {
     val view = LocalView.current
     val density = LocalDensity.current
     val dpadSize by SettingsStore.dpadSize.collectAsState()
     val visual = remember { DpadVisual() }
+
+    // Задержка исчезновения: перезапускается при каждом начале/конце касания
+    LaunchedEffect(visual.visible, visual.touchActive) {
+        if (visual.visible && !visual.touchActive) {
+            delay(HIDE_DELAY_MS)
+            visual.visible = false
+        }
+    }
 
     Box(
         Modifier
@@ -207,6 +288,7 @@ fun FloatingDPad(enabled: Boolean, onBits: (Int) -> Unit) {
                             val enterR = rPx * 0.32f
                             val exitR = rPx * 0.20f
                             visual.visible = true
+                            visual.touchActive = true
                             visual.center = down.position
                             var bits = 0
 
@@ -245,7 +327,9 @@ fun FloatingDPad(enabled: Boolean, onBits: (Int) -> Unit) {
                                 change.consume()
                             }
 
-                            visual.visible = false
+                            // Палец отпущен: направления сбрасываем сразу,
+                            // но визуально крестовина остаётся ещё 5 секунд
+                            visual.touchActive = false
                             visual.bits = 0
                             onBits(0)
                         }

@@ -20,10 +20,7 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -57,7 +54,6 @@ fun GameScreen(
     val layoutStore = remember {
         LayoutStore(context.getSharedPreferences("layout", Context.MODE_PRIVATE))
     }
-    var selectedCtrl by remember { mutableStateOf<String?>(null) }
     val editing = screen == Screen.EDIT
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
@@ -107,34 +103,20 @@ fun GameScreen(
             }
 
             FloatingDPad(enabled = true, onBits = { InputState.setDirs(it) })
-            ControlsLayer(
-                store = layoutStore,
-                editing = false,
-                selectedId = null,
-                onSelect = {}
-            )
+            ControlsLayer(store = layoutStore, editing = false)
         }
 
-        // Режим редактирования раскладки: игра на паузе, кнопки перетаскиваются
+        // Режим редактирования раскладки: игра на паузе, двигается вся группа кнопок
         if (started && editing) {
-            ControlsLayer(
-                store = layoutStore,
-                editing = true,
-                selectedId = selectedCtrl,
-                onSelect = { selectedCtrl = it }
-            )
+            ControlsLayer(store = layoutStore, editing = true)
             Box(
                 Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
             ) {
                 EditBar(
-                    selectedId = selectedCtrl,
                     store = layoutStore,
-                    onDone = {
-                        selectedCtrl = null
-                        onScreen(Screen.GAME)
-                    }
+                    onDone = { onScreen(Screen.GAME) }
                 )
             }
         }

@@ -30,6 +30,9 @@ object Native {
     /** Забрать накопленные сэмплы (int16, стерео) в буфер. Возвращает число сэмплов. */
     external fun drainAudio(buf: ByteBuffer): Int
 
+    /** Очистить накопленные сэмплы (при паузе/возобновлении, чтобы не играть устаревшее). */
+    external fun clearAudio()
+
     external fun avFps(): Double
     external fun avSampleRate(): Double
 

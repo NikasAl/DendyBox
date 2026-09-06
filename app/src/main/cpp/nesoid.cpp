@@ -364,6 +364,12 @@ Java_com_dendybox_app_Native_drainAudio(JNIEnv* env, jobject /*thiz*/, jobject b
     return static_cast<jint>(n);
 }
 
+JNIEXPORT void JNICALL
+Java_com_dendybox_app_Native_clearAudio(JNIEnv* /*env*/, jobject /*thiz*/) {
+    std::lock_guard<std::mutex> lock(g_audio_mtx);
+    g_audio.clear();
+}
+
 JNIEXPORT jdouble JNICALL
 Java_com_dendybox_app_Native_avFps(JNIEnv* /*env*/, jobject /*thiz*/) {
     return g_av.timing.fps > 20.0 ? g_av.timing.fps : 60.0988;

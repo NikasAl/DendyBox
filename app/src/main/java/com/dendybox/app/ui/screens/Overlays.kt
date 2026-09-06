@@ -48,7 +48,6 @@ import androidx.compose.ui.unit.dp
 import com.dendybox.app.saves.SaveManager
 import com.dendybox.app.settings.SettingsStore
 import com.dendybox.app.ui.controls.LayoutStore
-import com.dendybox.app.ui.controls.SPECS
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -304,26 +303,27 @@ private fun SettingSwitch(label: String, value: Boolean, onChange: (Boolean) -> 
 
 @Composable
 fun EditBar(
-    selectedId: String?,
     store: LayoutStore,
     onDone: () -> Unit
 ) {
+    val group = store.group
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
             Text(
-                text = if (selectedId == null) "Тяните кнопку пальцем, чтобы переместить. Нажмите на кнопку, чтобы выбрать её для изменения размера."
-                else "Выбрано: ${SPECS.firstOrNull { it.id == selectedId }?.label ?: selectedId}",
+                text = "Тяните любую кнопку — перемещается вся группа. " +
+                    "Слайдер масштабирует все кнопки сразу.",
                 style = MaterialTheme.typography.bodySmall
             )
-            if (selectedId != null) {
-                val spec = SPECS.first { it.id == selectedId }
-                val size = store.size(selectedId, spec.defSize)
-                Slider(
-                    value = size,
-                    valueRange = 30f..110f,
-                    onValueChange = { store.setSize(selectedId, it) }
-                )
-            }
+            Text(
+                text = "Размер блока: %d%%".format((group.scale * 100).toInt()),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Slider(
+                value = group.scale,
+                valueRange = LayoutStore.MIN_SCALE..LayoutStore.MAX_SCALE,
+                onValueChange = { store.updateGroup(group.copy(scale = it)) }
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = { store.reset() }, modifier = Modifier.weight(1f)) {
                     Text("Сбросить раскладку")
