@@ -32,7 +32,7 @@ cd DendyBox
 **Вариант Б (вручную)** — скачать и распаковать:
 
 ```
-https://buildbot.libretro.com/nightly/android/latest/arm64-v8a/cores/fceumm_libretro_android.so.zip
+https://buildbot.libretro.com/nightly/android/latest/arm64-v8a/fceumm_libretro_android.so.zip
 ```
 
 переименовать `.so` в `libcore_nes.so` и положить в
@@ -51,6 +51,53 @@ https://buildbot.libretro.com/nightly/android/latest/arm64-v8a/cores/fceumm_libr
 
 > Это каркас: он написан под компиляцию «с листа», но в редких случаях возможны
 > мелкие несовпадения версий — правятся в одну строку (обычно версия зависимости).
+
+## Сборка и запуск без Android Studio (gradle + adb)
+
+Всё можно делать из терминала — Studio не нужна.
+
+**1. JDK 17 + Android SDK (command-line tools):**
+
+```bash
+# Fedora/RHEL:
+sudo dnf install java-17-openjdk-devel
+# Ubuntu/Debian:
+sudo apt install openjdk-17-jdk
+
+# Command-line tools (https://developer.android.com/studio#command-line-tools-only):
+mkdir -p ~/Android/Sdk/cmdline-tools
+unzip commandlinetools-*.zip -d ~/Android/Sdk/cmdline-tools/latest
+export ANDROID_HOME=$HOME/Android/Sdk
+sdkmanager --licenses
+sdkmanager "platform-tools" "platforms;android-35" \
+           "build-tools;35.0.0" "cmake;3.22.1" "ndk;28.0.13039338"
+```
+
+**2. ROM и ядро** — Шаги 1–2 выше.
+
+**3. Одной командой:**
+
+```bash
+./scripts/run.sh          # собрать (debug) + установить + запустить
+./scripts/run.sh log      # то же + живой logcat приложения
+./scripts/run.sh build    # только APK: app/build/outputs/apk/debug/app-debug.apk
+./scripts/run.sh clean    # пересборка с нуля
+```
+
+Скрипт сам найдёт SDK и adb, создаст `local.properties`, подскажет, если
+устройство не видно. Вручную, по шагам, то же самое:
+
+```bash
+export ANDROID_HOME=$HOME/Android/Sdk
+./gradlew installDebug          # сборка + установка на подключённое устройство
+adb shell am start -n com.dendybox.app/.MainActivity
+adb logcat --pid=$(adb shell pidof -s com.dendybox.app)
+```
+
+**4. Отладка по USB:** Настройки → «Для разработчиков» → «Отладка по USB»
+(подтвердить запрос на телефоне). Беспроводно: `adb tcpip 5555 &&
+adb connect <IP-телефона>:5555`. Несколько устройств —
+`export ANDROID_SERIAL=<serial из adb devices>`.
 
 ---
 
