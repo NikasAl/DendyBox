@@ -7,11 +7,14 @@ import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
@@ -30,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.dendybox.app.cheats.CheatRepository
@@ -122,34 +127,43 @@ fun GameScreen(
         }
 
         // Редактор управления: игра на паузе; тяните блок или пустое место —
-        // двигается выделенный блок; щипок/слайдер — масштаб
+        // двигается выделенный блок; щипок/слайдер — масштаб.
+        // Панель редактора лежит ровно на области игрового изображения, поэтому
+        // блоки по краям (крестовина, A/B) и центр-низ (Select/Start) не
+        // перекрываются ею.
         if (started && editing) {
-            EditorSurface(store = layoutStore, selected = editTarget)
-            DpadLayer(
-                store = layoutStore,
-                editing = true,
-                selected = editTarget,
-                onSelect = { editTarget = LayoutStore.GroupId.DPAD },
-                enabled = false,
-                onBits = {}
-            )
-            ControlsLayer(
-                store = layoutStore,
-                editing = true,
-                selected = editTarget,
-                onSelect = { editTarget = it }
-            )
-            Box(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-            ) {
-                EditBar(
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val density = LocalDensity.current
+                // Прямоугольник игрового кадра — та же математика, что в движке
+                val frame = engine.frameRect(constraints.maxWidth, constraints.maxHeight)
+                EditorSurface(store = layoutStore, selected = editTarget)
+                DpadLayer(
                     store = layoutStore,
+                    editing = true,
                     selected = editTarget,
-                    onSelectGroup = { editTarget = it },
-                    onDone = { onScreen(Screen.GAME) }
+                    onSelect = { editTarget = LayoutStore.GroupId.DPAD },
+                    enabled = false,
+                    onBits = {}
                 )
+                ControlsLayer(
+                    store = layoutStore,
+                    editing = true,
+                    selected = editTarget,
+                    onSelect = { editTarget = it }
+                )
+                Box(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .offset { IntOffset(frame.left.toInt(), frame.top.toInt()) }
+                        .width(with(density) { frame.width().toDp() })
+                ) {
+                    EditBar(
+                        store = layoutStore,
+                        selected = editTarget,
+                        onSelectGroup = { editTarget = it },
+                        onDone = { onScreen(Screen.GAME) }
+                    )
+                }
             }
         }
 

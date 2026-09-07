@@ -120,7 +120,7 @@ class LayoutStore(private val prefs: SharedPreferences) {
         fun title(id: GroupId): String = when (id) {
             GroupId.DPAD -> "Крестовина"
             GroupId.AB -> "Кнопки A/B"
-            GroupId.META -> "Select / Start"
+            GroupId.META -> "Select/Start"
         }
     }
 }

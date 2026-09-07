@@ -3,10 +3,12 @@ package com.dendybox.app.ui.screens
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -34,6 +36,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -299,7 +302,10 @@ private fun SettingSwitch(label: String, value: Boolean, onChange: (Boolean) -> 
 }
 
 // ---------------------------------------------------------------------------
-// Панель редактора управления: выбор блока, масштаб выделенного блока, сброс
+// Компактная панель редактора управления: лежит ровно на области игрового
+// изображения (позицию/ширину задаёт GameScreen), три плотных строки —
+// заголовок с кнопками, выбор блока, масштаб. Кнопки управления на экране
+// остаются видимыми.
 // ---------------------------------------------------------------------------
 
 @Composable
@@ -310,40 +316,56 @@ fun EditBar(
     onDone: () -> Unit
 ) {
     val g = store.group(selected)
-    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
-            Text("Настройки управления", style = MaterialTheme.typography.titleMedium)
-            Text(
-                text = "Тяните блок или пустое место — двигается выделенный блок. " +
-                    "Щипок двумя пальцами или слайдер — масштаб.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+        shadowElevation = 6.dp,
+        shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Настройки управления",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { store.resetAll() }) { Text("Сбросить") }
+                Spacer(Modifier.width(4.dp))
+                Button(onClick = onDone) { Text("Готово") }
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.horizontalScroll(rememberScrollState())
+            ) {
                 LayoutStore.GroupId.entries.forEach { gid ->
                     FilterChip(
                         selected = gid == selected,
                         onClick = { onSelectGroup(gid) },
-                        label = { Text(LayoutStore.title(gid)) }
+                        label = {
+                            Text(LayoutStore.title(gid), style = MaterialTheme.typography.labelLarge)
+                        }
                     )
                 }
             }
-            Text(
-                text = "Масштаб «%s»: %d%%".format(LayoutStore.title(selected), (g.scale * 100).toInt()),
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Slider(
-                value = g.scale,
-                valueRange = LayoutStore.MIN_SCALE..LayoutStore.MAX_SCALE,
-                onValueChange = { store.updateGroup(selected, g.copy(scale = it)) }
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = { store.resetAll() }, modifier = Modifier.weight(1f)) {
-                    Text("Сбросить всё")
-                }
-                Button(onClick = onDone, modifier = Modifier.weight(1f)) {
-                    Text("Готово")
-                }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "«%s» %d%%".format(LayoutStore.title(selected), (g.scale * 100).toInt()),
+                    style = MaterialTheme.typography.labelMedium
+                )
+                Slider(
+                    value = g.scale,
+                    valueRange = LayoutStore.MIN_SCALE..LayoutStore.MAX_SCALE,
+                    onValueChange = { store.updateGroup(selected, g.copy(scale = it)) },
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
     }

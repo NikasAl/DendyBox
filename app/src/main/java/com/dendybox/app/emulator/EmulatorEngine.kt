@@ -227,21 +227,29 @@ class EmulatorEngine(private val context: Context) {
         }
     }
 
+    /**
+     * Прямоугольник игрового кадра на поверхности [vw]×[vh] px — letterbox
+     * с целым масштабированием (та же математика, что в drawFrame).
+     * Используется UI (редактор управления), чтобы привязываться к картинке.
+     */
+    fun frameRect(vw: Int, vh: Int): RectF {
+        val s0 = min(vw / frameW.toFloat(), vh / frameH.toFloat())
+        val scale = if (s0 >= 1f) floor(s0) else s0
+        val w = frameW * scale
+        val hh = frameH * scale
+        val l = (vw - w) / 2f
+        val t = (vh - hh) / 2f
+        return RectF(l, t, l + w, t + hh)
+    }
+
     private fun drawFrame(h: SurfaceHolder, bmp: Bitmap, paint: Paint) {
         val c = h.lockCanvas() ?: return
         try {
             c.drawColor(Color.BLACK)
-            val vw = c.width.toFloat()
-            val vh = c.height.toFloat()
-            val s0 = min(vw / frameW, vh / frameH)
-            val scale = if (s0 >= 1f) floor(s0) else s0 // целое масштабирование без «мыла»
+            val r = frameRect(c.width, c.height)
             // При целом масштабе рисуем без фильтра: чётче картинка и дешевле отрисовка
-            paint.isFilterBitmap = scale != floor(scale)
-            val w = frameW * scale
-            val hh = frameH * scale
-            val l = (vw - w) / 2f
-            val t = (vh - hh) / 2f
-            c.drawBitmap(bmp, null, RectF(l, t, l + w, t + hh), paint)
+            paint.isFilterBitmap = (r.width() / frameW) != floor(r.width() / frameW)
+            c.drawBitmap(bmp, null, r, paint)
         } finally {
             try { h.unlockCanvasAndPost(c) } catch (_: Exception) {}
         }
