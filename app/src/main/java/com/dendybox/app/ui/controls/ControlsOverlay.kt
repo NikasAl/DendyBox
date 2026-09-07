@@ -81,16 +81,26 @@ private fun specsOf(id: LayoutStore.GroupId): List<CtrlSpec> = when (id) {
 }
 
 /**
- * Полуразмеры группы в dp при масштабе 1.0 (половина ширины, половина высоты) —
- * для рамки в редакторе и зажима группы в границах экрана.
- * Для крестовины это её радиус (базовый из настроек, без масштаба группы).
+ * Границы контента группы относительно её якоря (в dp при масштабе 1.0):
+ * насколько контент выступает влево/вверх/вправо/вниз от центра.
+ *
+ * Блок A/B НЕсимметричен по вертикали: сверху турбо-ряд (81dp), снизу —
+ * только основные кнопки (32dp). Рамка в редакторе и зажим в границах
+ * экрана следуют контенту — без «фантомного» отступа под кнопками,
+ * чтобы блок можно было прижать к нижнему краю экрана.
  */
-fun halfExtentDp(id: LayoutStore.GroupId, dpadBaseRadiusDp: Float): Pair<Float, Float> =
-    when (id) {
-        LayoutStore.GroupId.AB -> 68f to 81f
-        LayoutStore.GroupId.META -> 52f to 23f
-        LayoutStore.GroupId.DPAD -> dpadBaseRadiusDp to dpadBaseRadiusDp
-    }
+data class Extents(val left: Float, val top: Float, val right: Float, val bottom: Float)
+
+fun extentsDp(id: LayoutStore.GroupId, dpadBaseRadiusDp: Float): Extents = when (id) {
+    LayoutStore.GroupId.AB -> Extents(left = 68f, top = 81f, right = 68f, bottom = 32f)
+    LayoutStore.GroupId.META -> Extents(left = 52f, top = 23f, right = 52f, bottom = 23f)
+    LayoutStore.GroupId.DPAD -> Extents(
+        left = dpadBaseRadiusDp,
+        top = dpadBaseRadiusDp,
+        right = dpadBaseRadiusDp,
+        bottom = dpadBaseRadiusDp
+    )
+}
 
 private fun handlePress(id: String, down: Boolean) {
     when (id) {
@@ -109,6 +119,8 @@ private fun handlePress(id: String, down: Boolean) {
 
 /**
  * Сдвинуть группу на [dxPx]/[dyPx] пикселей и умножить масштаб на [zoom].
+ * Зажим — по контентным границам группы (несимметричным для A/B: снизу
+ * рамка прижата к кнопкам — блок можно ставить у самого низа экрана).
  * Всё состояние читается ВНУТРИ на момент события (колбэки pointerInput
  * не пересоздаются при рекомпозиции — захватывать значения «на старте» нельзя).
  */
@@ -123,14 +135,16 @@ private fun moveGroupBy(
     dpadBaseRadiusDp: Float
 ) {
     val g = store.group(id)
-    val (hwdp, hhdp) = halfExtentDp(id, dpadBaseRadiusDp)
-    val hw = with(density) { (hwdp * g.scale).dp.toPx() / parentPx.width }.coerceAtMost(0.5f)
-    val hh = with(density) { (hhdp * g.scale).dp.toPx() / parentPx.height }.coerceAtMost(0.5f)
+    val e = extentsDp(id, dpadBaseRadiusDp)
+    val l = with(density) { (e.left * g.scale).dp.toPx() / parentPx.width }.coerceAtMost(0.5f)
+    val r = with(density) { (e.right * g.scale).dp.toPx() / parentPx.width }.coerceAtMost(0.5f)
+    val t = with(density) { (e.top * g.scale).dp.toPx() / parentPx.height }.coerceAtMost(0.5f)
+    val b = with(density) { (e.bottom * g.scale).dp.toPx() / parentPx.height }.coerceAtMost(0.5f)
     store.updateGroup(
         id,
         LayoutStore.Group(
-            x = (g.x + dxPx / parentPx.width).coerceIn(hw, (1f - hw).coerceAtLeast(hw)),
-            y = (g.y + dyPx / parentPx.height).coerceIn(hh, (1f - hh).coerceAtLeast(hh)),
+            x = (g.x + dxPx / parentPx.width).coerceIn(l, (1f - r).coerceAtLeast(l)),
+            y = (g.y + dyPx / parentPx.height).coerceIn(t, (1f - b).coerceAtLeast(t)),
             scale = (g.scale * zoom).coerceIn(LayoutStore.MIN_SCALE, LayoutStore.MAX_SCALE)
         )
     )
@@ -166,14 +180,18 @@ fun EditorSurface(store: LayoutStore, selected: LayoutStore.GroupId) {
 /**
  * Рамка группы в редакторе: подпись + выделение цветом. Тап — выделить,
  * перетаскивание за пустое место рамки — двигать группу.
+ * Границы задаются контентными отступами [leftPx]/[topPx]/[rightPx]/[bottomPx]
+ * от якоря (для A/B снизу рамка прижата к кнопкам без зазора).
  * Рисуется ПОД кнопками группы (кнопки перехватывают касания на себе).
  */
 @Composable
 private fun GroupFrame(
     cxPx: Float,
     cyPx: Float,
-    halfWpx: Float,
-    halfHpx: Float,
+    leftPx: Float,
+    topPx: Float,
+    rightPx: Float,
+    bottomPx: Float,
     label: String,
     selected: Boolean,
     onSelect: () -> Unit,
@@ -183,10 +201,10 @@ private fun GroupFrame(
     val borderColor = if (selected) AccentRed.copy(alpha = 0.95f) else Color.White.copy(alpha = 0.45f)
     Box(
         Modifier
-            .offset { IntOffset((cxPx - halfWpx).toInt(), (cyPx - halfHpx).toInt()) }
+            .offset { IntOffset((cxPx - leftPx).toInt(), (cyPx - topPx).toInt()) }
             .size(
-                (halfWpx * 2f / density.density).dp,
-                (halfHpx * 2f / density.density).dp
+                ((leftPx + rightPx) / density.density).dp,
+                ((topPx + bottomPx) / density.density).dp
             )
             .border(1.5.dp, borderColor, RoundedCornerShape(14.dp))
             .pointerInput(Unit) { detectTapGestures(onTap = { onSelect() }) }
@@ -235,9 +253,11 @@ fun ControlsLayer(
             val g = store.group(gid) // чтение state — рекомпозиция при изменении
             val cx = g.x * parentPx.width
             val cy = g.y * parentPx.height
-            val (hwdp, hhdp) = halfExtentDp(gid, 0f)
-            val halfWpx = with(density) { (hwdp * g.scale).dp.toPx() }
-            val halfHpx = with(density) { (hhdp * g.scale).dp.toPx() }
+            val e = extentsDp(gid, 0f)
+            val lPx = with(density) { (e.left * g.scale).dp.toPx() }
+            val tPx = with(density) { (e.top * g.scale).dp.toPx() }
+            val rPx = with(density) { (e.right * g.scale).dp.toPx() }
+            val bPx = with(density) { (e.bottom * g.scale).dp.toPx() }
 
             // Рамка группы — ПОД кнопками (объявлена раньше в z-порядке)
             if (editing) {
@@ -245,8 +265,10 @@ fun ControlsLayer(
                     GroupFrame(
                         cxPx = cx,
                         cyPx = cy,
-                        halfWpx = halfWpx,
-                        halfHpx = halfHpx,
+                        leftPx = lPx,
+                        topPx = tPx,
+                        rightPx = rPx,
+                        bottomPx = bPx,
                         label = LayoutStore.title(gid),
                         selected = selected == gid,
                         onSelect = { onSelect(gid) },
@@ -505,8 +527,10 @@ fun DpadLayer(
             GroupFrame(
                 cxPx = cx,
                 cyPx = cy,
-                halfWpx = rPx,
-                halfHpx = rPx,
+                leftPx = rPx,
+                topPx = rPx,
+                rightPx = rPx,
+                bottomPx = rPx,
                 label = LayoutStore.title(LayoutStore.GroupId.DPAD),
                 selected = selected == LayoutStore.GroupId.DPAD,
                 onSelect = { onSelect(LayoutStore.GroupId.DPAD) },
