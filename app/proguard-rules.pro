@@ -6,3 +6,6 @@
 
 # org.json — платформенный, не трогаем
 -dontwarn org.json.**
+
+# Общая страховка JNI: native-методы не переименовывать (на случай будущих мостов)
+-keepclasseswithmembernames class * { native <methods>; }

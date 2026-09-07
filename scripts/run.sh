@@ -3,20 +3,34 @@
 # DendyBox: сборка, установка и запуск БЕЗ Android Studio (gradle + adb).
 #
 # Использование:
-#   ./scripts/run.sh           собрать (debug), установить, запустить
-#   ./scripts/run.sh build     только собрать APK (app/build/outputs/apk/debug/)
-#   ./scripts/run.sh log       собрать/установить/запустить + поток logcat
-#   ./scripts/run.sh clean     пересборка с нуля (clean + install + запуск)
+#   ./scripts/run.sh <flavor>            собрать (debug), установить, запустить
+#   ./scripts/run.sh <flavor> build      только собрать APK
+#   ./scripts/run.sh <flavor> log        собрать/установить/запустить + logcat
+#   ./scripts/run.sh <flavor> clean      пересборка с нуля (+ установка/запуск)
 #
-# Требования: JDK 17 (JAVA_HOME или java в PATH), Android SDK.
+#   <flavor> — имя игры из roms/games.json или имя файла ROM в roms/
+#   (например: robocop3). Список: ./scripts/build_release.sh
+#
+# Требования: JDK 17 (JAVA_HOME или java в PATH), Android SDK, ROM в roms/.
 # ANDROID_HOME берётся из окружения или local.properties (создаётся сам).
 # Если подключено несколько устройств — экспортируйте ANDROID_SERIAL=<serial>.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-MODE="${1:-run}"
-PKG="com.dendybox.app"
+FLAVOR="${1:-}"
+MODE="${2:-run}"
+
+if [ -z "$FLAVOR" ]; then
+  echo "Использование: $0 <flavor> [run|build|log|clean]"
+  echo "  Пример: $0 robocop3"
+  echo ""
+  echo "Доступные игры:"
+  "$ROOT/scripts/build_release.sh"
+  exit 1
+fi
+PKG="com.dendybox.app.$FLAVOR"
+CAP="$(echo "$FLAVOR" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
 
 # --- java -----------------------------------------------------------------
 if ! command -v java >/dev/null 2>&1; then
@@ -69,26 +83,28 @@ cd "$ROOT"
 
 # --- сборка ---------------------------------------------------------------
 case "$MODE" in
-  build) GRADLE_TASKS="assembleDebug" ;;
-  clean) GRADLE_TASKS="clean installDebug" ;;
-  *)     GRADLE_TASKS="installDebug" ;;
+  build) GRADLE_TASKS="assemble${CAP}Debug" ;;
+  clean) GRADLE_TASKS="clean install${CAP}Debug" ;;
+  log|run) GRADLE_TASKS="install${CAP}Debug" ;;
+  *) echo "Неизвестный режим: $MODE (run|build|log|clean)"; exit 1 ;;
 esac
 
-echo "==> ./gradlew $GRADLE_TASKS"
+echo "==> ./gradlew $GRADLE_TASKS (flavor: $FLAVOR)"
 ./gradlew "$GRADLE_TASKS" --console=plain -q
 
 # APK собран, но устройство не требуется (режим build)
 if [ "$MODE" = "build" ]; then
+  APK="$(ls -t "$ROOT"/app/build/outputs/apk/$FLAVOR/debug/*.apk 2>/dev/null | head -n 1 || true)"
   echo
-  echo "Готово: $ROOT/app/build/outputs/apk/debug/app-debug.apk"
+  echo "Готово: ${APK:-$ROOT/app/build/outputs/apk/$FLAVOR/debug/}"
   exit 0
 fi
 
 # --- установка + запуск ----------------------------------------------------
 need_device
-echo "==> Установлено. Запускаю $PKG/.MainActivity"
+echo "==> Установлено. Запускаю $PKG/com.dendybox.app.MainActivity"
 "$ADB" shell am force-stop "$PKG" 2>/dev/null || true
-"$ADB" shell am start -n "$PKG/.MainActivity"
+"$ADB" shell am start -n "$PKG/com.dendybox.app.MainActivity"
 
 # --- logcat ----------------------------------------------------------------
 if [ "$MODE" = "log" ]; then
@@ -102,4 +118,4 @@ if [ "$MODE" = "log" ]; then
   fi
 fi
 
-echo "Готово. Логи: ./scripts/run.sh log  или  adb logcat --pid=\$(adb shell pidof -s $PKG)"
+echo "Готово. Логи: ./scripts/run.sh $FLAVOR log  или  adb logcat --pid=\$(adb shell pidof -s $PKG)"

@@ -91,7 +91,10 @@ private fun AppRoot() {
         when {
             started -> engine.attachSurface(h)
             romMissing -> startError =
-                "ROM не найден.\n\nПоложите ваш ROM в проект:\napp/src/main/assets/rom.nes\nи пересоберите приложение (см. README.md)."
+                "ROM не найден в этой сборке.\n\n" +
+                "Соберите приложение под нужную игру:\n" +
+                "положите ROM в папку roms/ проекта и выполните\n" +
+                "./scripts/build_release.sh <flavor>  (см. roms/README.md)"
             romBytes == null -> pendingSurface = h // ждём завершения чтения assets
             else -> {
                 val err = engine.start(romBytes!!)

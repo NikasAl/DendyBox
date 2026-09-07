@@ -7,7 +7,13 @@ app/build/
 app/.cxx/
 # Ядро эмулятора скачивается скриптом scripts/build_core_fceumm.sh
 app/src/main/jniLibs/**/*.so
-# ROM не хранится в репозитории
-app/src/main/assets/rom.nes
+# ROM'ы не хранятся в публичном репозитории (только README и games.json)
+roms/*
+!roms/README.md
+!roms/games.json
+# Релизный keystore и пароли подписи — только локально (см. scripts/make_keystore.sh)
+keystore/
+# Скриншоты для магазина — артефакты локальных съёмок (только корневая папка)
+/screenshots/
 captures/
 .DS_Store

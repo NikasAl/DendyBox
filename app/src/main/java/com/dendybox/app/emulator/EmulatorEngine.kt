@@ -75,7 +75,7 @@ class EmulatorEngine(private val context: Context) {
         }
         if (!Native.loadRom(rom)) {
             return "ROM не удалось загрузить.\n\n" +
-                "Проверьте файл: ./scripts/check_rom.sh app/src/main/assets/rom.nes\n" +
+                "Проверьте файл: ./scripts/check_rom.sh roms/<имя_рома>.nes\n" +
                 "Подробная причина — в logcat по тегу «DendyBox» (./scripts/run.sh log)."
         }
 

@@ -1,24 +1,113 @@
+import com.android.build.gradle.internal.api.BaseVariantOutputImpl
+import groovy.json.JsonSlurper
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// ============================================================================
+// Игры (ROM → отдельное приложение)
+//
+// Каждый ROM из папки roms/ превращается в product flavor — самостоятельное
+// приложение com.dendybox.app.<flavor> с ОДНИМ ROM внутри (assets/rom.nes).
+// Имя flavor'а, заголовок приложения и ROM-файл задаются в roms/games.json:
+//
+//   {
+//     "robocop3.nes": { "flavor": "robocop3", "title": "RoboCop 3" }
+//   }
+//
+// Если games.json нет, flavor создаётся автоматически из имени файла
+// («RoboCop 3.nes» → flavor robocop3). ROM'ы в git НЕ коммитятся (публичный
+// репозиторий) — папка roms/ живёт только у вас, см. roms/README.md.
+// ============================================================================
+
+val romsDir = rootProject.file("roms")
+val gamesJsonFile = romsDir.resolve("games.json")
+
+data class GameSpec(val fileName: String, val file: File?, val flavor: String, val title: String)
+
+fun sanitizeFlavorName(raw: String): String {
+    val cleaned = raw.lowercase().filter { it in 'a'..'z' || it in '0'..'9' }
+    // applicationId-сегмент не может начинаться с цифры и не может быть пустым
+    return if (cleaned.isEmpty() || cleaned[0] !in 'a'..'z') "game$cleaned" else cleaned
+}
+
+val gameSpecs: List<GameSpec> = run {
+    val overrides = linkedMapOf<String, Map<*, *>>()
+    if (gamesJsonFile.exists()) {
+        try {
+            val parsed = JsonSlurper().parse(gamesJsonFile)
+            if (parsed is Map<*, *>) {
+                parsed.forEach { (k, v) -> if (v is Map<*, *>) overrides[k.toString()] = v }
+            } else {
+                throw GradleException("roms/games.json: ожидается объект { \"файл.nes\": {...} }")
+            }
+        } catch (e: GradleException) {
+            throw e
+        } catch (e: Exception) {
+            throw GradleException("roms/games.json не читается: ${e.message}")
+        }
+    }
+    val romExts = setOf("nes", "unf", "unif", "fds")
+    val romFiles = romsDir.listFiles { f -> f.isFile && f.extension.lowercase() in romExts }
+        ?.sortedBy { it.name } ?: emptyList()
+    val names = (romFiles.map { it.name } + overrides.keys).distinct().sorted()
+    val specs = names.map { name ->
+        val o: Map<*, *> = overrides[name] ?: emptyMap<String, Any>()
+        val flavorRaw = (o["flavor"] as? String) ?: File(name).nameWithoutExtension
+        val title = (o["title"] as? String) ?: File(name).nameWithoutExtension
+        GameSpec(name, romFiles.firstOrNull { it.name == name }, sanitizeFlavorName(flavorRaw), title)
+    }
+    val dup = specs.groupBy { it.flavor }.filterValues { it.size > 1 }.keys
+    if (dup.isNotEmpty()) {
+        throw GradleException("Конфликт имён flavor в roms/games.json: $dup — задайте уникальные flavor")
+    }
+    if (specs.isEmpty()) {
+        println("DendyBox: в roms/ нет ROM-файлов и нет roms/games.json — product flavors не созданы")
+    }
+    specs
+}
+
+// ============================================================================
+// Подпись релиза
+//
+// keystore/ НЕ хранится в git (репозиторий публичный). Один раз выполните:
+//   ./scripts/make_keystore.sh
+// — он создаст keystore/release.keystore + keystore/keystore.properties.
+// ОБЯЗАТЕЛЬНО сделайте резервную копию папки keystore/: обновления приложения
+// в магазине должны быть подписаны тем же ключом.
+// Без keystore release будет подписан debug-ключом (только для локальных тестов).
+// ============================================================================
+
+val keystoreDir = rootProject.file("keystore")
+val ksProps = Properties().apply {
+    val f = keystoreDir.resolve("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+val ksStoreFile = ksProps.getProperty("store.file")?.let { rootProject.file(it) }
+val releaseSigningReady = ksStoreFile?.exists() == true &&
+    ksProps.getProperty("store.password")?.isNotBlank() == true &&
+    ksProps.getProperty("key.alias")?.isNotBlank() == true
+val releaseSignConfigName = if (releaseSigningReady) "release" else "debug"
+
 android {
     namespace = "com.dendybox.app"
     compileSdk = 35
 
     defaultConfig {
+        // Базовый applicationId переопределяется каждым flavor'ом:
+        // com.dendybox.app.<flavor>
         applicationId = "com.dendybox.app"
         minSdk = 26        // Android 8.0
         targetSdk = 35
         versionCode = 1
-        versionName = "0.1"
+        versionName = "1.0"
 
-        ndk {
-            // x86_64 — для запуска на эмуляторе Android Studio
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
-        }
+        // Локали ресурсов AndroidX: только русская (уменьшение размера APK)
+        resourceConfigurations += listOf("ru")
 
         externalNativeBuild {
             cmake {
@@ -27,17 +116,58 @@ android {
         }
     }
 
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
+    signingConfigs {
+        if (releaseSigningReady) {
+            create("release") {
+                storeFile = ksStoreFile
+                storePassword = ksProps.getProperty("store.password")
+                keyAlias = ksProps.getProperty("key.alias")
+                keyPassword = ksProps.getProperty("key.password")
+                    ?: ksProps.getProperty("store.password")
+            }
         }
     }
 
     buildTypes {
+        debug {
+            // x86_64 — для запуска на эмуляторе Android Studio
+            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+        }
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Релиз: только реальные телефоны (ARM), без x86/x86_64 — экономия размера
+            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+            signingConfig = signingConfigs.getByName(releaseSignConfigName)
+        }
+    }
+
+    // ================= Игровые flavor'ы (по одному на ROM) =================
+    flavorDimensions += listOf("game")
+    productFlavors {
+        gameSpecs.forEach { spec ->
+            create(spec.flavor) {
+                dimension = "game"
+                applicationId = "com.dendybox.app.${spec.flavor}"
+                resValue("string", "app_name", "DendyBox: ${spec.title}")
+            }
+        }
+    }
+
+    // ROM копируется из roms/ в assets варианта задачей prepare<Flavor>Rom (ниже)
+    sourceSets {
+        gameSpecs.forEach { spec ->
+            getByName(spec.flavor) {
+                assets.srcDir(layout.buildDirectory.dir("generated/rom/${spec.flavor}"))
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 
@@ -57,6 +187,61 @@ android {
             useLegacyPackaging = true
         }
     }
+    lint {
+        // Личный проект: lint не должен блокировать релизную сборку
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
+
+    // Понятные имена файлов: DendyBox-robocop3-1.0-release.apk
+    applicationVariants.all {
+        outputs.all {
+            (this as BaseVariantOutputImpl).outputFileName =
+                "DendyBox-${flavorName}-${versionName}-${buildType.name}.apk"
+        }
+    }
+}
+
+// ================= Копирование выбранного ROM в assets варианта =================
+// «Одна игра — один картридж»: в каждый APK попадает ровно один ROM (rom.nes).
+gameSpecs.forEach { spec ->
+    val cap = spec.flavor.replaceFirstChar { it.uppercaseChar() }
+    val outDir = layout.buildDirectory.dir("generated/rom/${spec.flavor}")
+    tasks.register("prepare${cap}Rom") {
+        group = "dendybox"
+        description = "Копирует roms/${spec.fileName} в assets варианта ${spec.flavor} (как rom.nes)"
+        val src = spec.file
+        if (src != null) inputs.file(src)
+        outputs.file(outDir.map { it.file("rom.nes") })
+        doLast {
+            if (src == null || !src.exists()) {
+                throw GradleException(
+                    "ROM не найден: roms/${spec.fileName}\n" +
+                    "Положите файл в папку roms/ под именем ${spec.fileName}\n" +
+                    "(или поправьте roms/games.json) и повторите сборку."
+                )
+            }
+            val dir = outDir.get().asFile
+            dir.mkdirs()
+            copy {
+                from(src)
+                rename { "rom.nes" }
+                into(dir)
+            }
+        }
+    }
+    tasks.whenTaskAdded {
+        if (name.startsWith("merge$cap") && name.endsWith("Assets")) {
+            dependsOn("prepare${cap}Rom")
+        }
+    }
+}
+
+if (!releaseSigningReady) {
+    println(
+        "DendyBox: релизный keystore не найден — release будет подписан debug-ключом.\n" +
+        "Для публикации в магазине выполните: ./scripts/make_keystore.sh"
+    )
 }
 
 dependencies {

@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- app_name генерируется Gradle-ом (resValue): см. app/build.gradle.kts,
+     раздел productFlavors — «DendyBox: <Название игры>» для каждого ROM -->
 <resources>
-    <string name="app_name">DendyBox</string>
 </resources>
