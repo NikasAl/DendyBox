@@ -1,6 +1,17 @@
 import com.android.build.gradle.internal.api.BaseVariantOutputImpl
 import groovy.json.JsonSlurper
 import java.util.Properties
+import javax.inject.Inject
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.Internal
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.TaskAction
+import org.gradle.process.ExecOperations
 
 plugins {
     id("com.android.application")
@@ -69,6 +80,42 @@ val gameSpecs: List<GameSpec> = run {
         println("DendyBox: в roms/ нет ROM-файлов и нет roms/games.json — product flavors не созданы")
     }
     specs
+}
+
+// ============================================================================
+// Иконка варианта: metadata/<flavor>/icon.png -> adaptive-иконка лаунчера
+// (генерирует scripts/make_icons.py) + metadata/<flavor>/icon512.png (RuStore).
+// Задача подключается через addGeneratedSourceDirectory — AGP сам ставит её
+// раньше всех задач, читающих ресурсы варианта.
+// Иконка ОПЦИОНАЛЬНА: нет icon.png — собираемся со стандартной иконкой DendyBox.
+// ============================================================================
+abstract class PrepareIconsTask : DefaultTask() {
+    @get:InputFile
+    abstract val iconSrc: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @get:Input
+    abstract val flavorName: Property<String>
+
+    @get:Internal
+    abstract val projectRoot: DirectoryProperty
+
+    @get:Inject
+    abstract val execOps: ExecOperations
+
+    @TaskAction
+    fun generate() {
+        execOps.exec {
+            workingDir = projectRoot.get().asFile
+            // Второй аргумент — res-каталог, куда положить иконку ЭТОГО варианта
+            commandLine(
+                "bash", "scripts/make_icons.sh", flavorName.get(),
+                outputDir.get().asFile.absolutePath
+            )
+        }
+    }
 }
 
 // ============================================================================
@@ -234,6 +281,31 @@ gameSpecs.forEach { spec ->
         if (name.startsWith("merge$cap") && name.endsWith("Assets")) {
             dependsOn("prepare${cap}Rom")
         }
+    }
+}
+
+// ================= Генерация иконки варианта =================
+// Регистрируется на КАЖДЫЙ VARIANT (robocop3Release/robocop3Debug): у каждого
+// свой выходной каталог, AGP сам провязывает зависимости всех потребителей ресурсов.
+androidComponents {
+    onVariants { variant ->
+        val flavor = variant.flavorName ?: return@onVariants
+        val iconSrc = rootProject.file("metadata/$flavor/icon.png")
+        if (!iconSrc.exists()) {
+            println("DendyBox: metadata/$flavor/icon.png нет — собираем со стандартной иконкой DendyBox")
+            return@onVariants
+        }
+        val cap = variant.name.replaceFirstChar { it.uppercaseChar() }
+        val iconsTask = tasks.register("prepare${cap}Icons", PrepareIconsTask::class.java) {
+            group = "dendybox"
+            description = "Генерирует иконку варианта $flavor из metadata/$flavor/icon.png"
+            this.iconSrc.set(iconSrc)
+            this.flavorName.set(flavor)
+            this.projectRoot.set(rootDir)
+            // outputDir назначает сам AGP (addGeneratedSourceDirectory):
+            // app/build/generated/res/prepare<Cap>Icons — скрипту путь передаётся аргументом
+        }
+        variant.sources.res?.addGeneratedSourceDirectory(iconsTask, PrepareIconsTask::outputDir)
     }
 }
 

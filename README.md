@@ -136,6 +136,11 @@ adb connect <IP-телефона>:5555`. Несколько устройств �
 * **Оптимизация размера**: без x86/x86_64 (только `arm64-v8a` +
   `armeabi-v7a`), R8-минификация + сжатие ресурсов, локали только `ru`.
 * **Имя APK**: `app/build/outputs/apk/<flavor>/release/DendyBox-<flavor>-<версия>-release.apk`.
+* **Иконка игры**: если есть `metadata/<flavor>/icon.png` — из неё автоматически
+  готовится иконка лаунчера (adaptive, webp) и `metadata/<flavor>/icon512.png`
+  для карточки RuStore (нужен python3 + Pillow: `pip3 install --user pillow`).
+  Нет icon.png — собирается стандартная иконка DendyBox. Подробнее:
+  `metadata/README.md → «Иконка игры»`.
 * ROM не положен в `roms/` — сборка падает с понятной ошибкой (не молча).
 
 ### Скриншоты для магазина (adb)

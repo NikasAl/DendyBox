@@ -111,6 +111,20 @@ if [ -n "$ROM_EXPECTED" ] && [ ! -f "roms/$ROM_EXPECTED" ]; then
   exit 1
 fi
 
+# --- иконка варианта (из metadata/<flavor>/icon.png) ---
+# Генерируем ДО gradle, чтобы отсутствие Pillow было видно сразу,
+# а не после трёх минут сборки (в gradle задача prepare<Flavor><Type>Icons
+# вызовет тот же скрипт ещё раз при необходимости).
+if [ -f "metadata/$FLAVOR/icon.png" ]; then
+  echo ""
+  echo "=== иконка варианта ($FLAVOR) ==="
+  ./scripts/make_icons.sh "$FLAVOR"
+else
+  echo ""
+  echo "Иконка metadata/$FLAVOR/icon.png не найдена — собираем со стандартной иконкой DendyBox."
+  echo "(Положите PNG в metadata/$FLAVOR/icon.png и пересоберите, чтобы задать свою иконку.)"
+fi
+
 CAP="$(echo "$FLAVOR" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
 TYPE_CAP="$(echo "$TYPE" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
 echo ""
