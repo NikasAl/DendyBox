@@ -15,5 +15,6 @@ roms/*
 keystore/
 # Скриншоты для магазина — артефакты локальных съёмок (только корневая папка)
 /screenshots/
+/videos/
 captures/
 .DS_Store

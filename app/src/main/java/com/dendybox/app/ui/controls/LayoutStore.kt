@@ -151,9 +151,9 @@ class LayoutStore(private val prefs: SharedPreferences) {
         // x/y — якорь группы в долях экрана, scale — множитель базовых dp-размеров.
         // Обновляется скриптом: scripts/layout_to_defaults.py <layout.json>
         // (JSON — тот же, что пишет кнопка «Экспорт» в редакторе раскладки)
-        val DEF_DPAD = Group(0.13f, 0.70f, 1.0f)
-        val DEF_AB = Group(0.86f, 0.70f, 1.0f)
-        val DEF_META = Group(0.50f, 0.84f, 1.0f)
+        val DEF_DPAD = Group(0.133f, 0.756f, 1.507f)
+        val DEF_AB = Group(0.873f, 0.748f, 1.394f)
+        val DEF_META = Group(0.854f, 0.265f, 1.0f)
 
         fun title(id: GroupId): String = when (id) {
             GroupId.DPAD -> "Крестовина"
