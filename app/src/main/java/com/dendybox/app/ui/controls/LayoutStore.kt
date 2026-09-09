@@ -80,6 +80,49 @@ class LayoutStore(private val prefs: SharedPreferences) {
         persist()
     }
 
+    /** Текущая раскладка в том же JSON, что и в prefs (для экспорта в файл). */
+    fun toJson(): String {
+        fun j(g: Group) = org.json.JSONObject()
+            .put("x", g.x.toDouble())
+            .put("y", g.y.toDouble())
+            .put("s", g.scale.toDouble())
+        return org.json.JSONObject()
+            .put("dpad", j(dpad))
+            .put("ab", j(ab))
+            .put("meta", j(meta))
+            .toString()
+    }
+
+    /**
+     * Применить раскладку из JSON (импорт из файла); значения зажимаются
+     * в допустимые пределы. false — если данные не похожи на раскладку.
+     */
+    fun applyJson(raw: String): Boolean {
+        val o = try {
+            org.json.JSONObject(raw)
+        } catch (_: Exception) {
+            return false
+        }
+        fun read(k: String): Group? = try {
+            val g = o.getJSONObject(k)
+            Group(
+                x = g.getDouble("x").toFloat(),
+                y = g.getDouble("y").toFloat(),
+                scale = g.getDouble("s").toFloat()
+            )
+        } catch (_: Exception) {
+            null
+        }
+        val d = read("dpad") ?: return false
+        val a = read("ab") ?: return false
+        val m = read("meta") ?: return false
+        dpad = sanitize(d)
+        ab = sanitize(a)
+        meta = sanitize(m)
+        persist()
+        return true
+    }
+
     /** Вернуть все группы к заводской раскладке. */
     fun resetAll() {
         dpad = DEF_DPAD
@@ -95,15 +138,7 @@ class LayoutStore(private val prefs: SharedPreferences) {
     )
 
     private fun persist() {
-        fun j(g: Group) = org.json.JSONObject()
-            .put("x", g.x.toDouble())
-            .put("y", g.y.toDouble())
-            .put("s", g.scale.toDouble())
-        val o = org.json.JSONObject()
-            .put("dpad", j(dpad))
-            .put("ab", j(ab))
-            .put("meta", j(meta))
-        prefs.edit().putString(PREF_KEY, o.toString()).apply()
+        prefs.edit().putString(PREF_KEY, toJson()).apply()
     }
 
     companion object {
@@ -112,7 +147,10 @@ class LayoutStore(private val prefs: SharedPreferences) {
         const val MIN_SCALE = 0.5f
         const val MAX_SCALE = 2.0f
 
-        // Дефолт (ландшафт): крестовина слева, A/B справа, Select/Start по центру
+        // Дефолт (ландшафт): крестовина слева, A/B справа, Select/Start по центру.
+        // x/y — якорь группы в долях экрана, scale — множитель базовых dp-размеров.
+        // Обновляется скриптом: scripts/layout_to_defaults.py <layout.json>
+        // (JSON — тот же, что пишет кнопка «Экспорт» в редакторе раскладки)
         val DEF_DPAD = Group(0.13f, 0.70f, 1.0f)
         val DEF_AB = Group(0.86f, 0.70f, 1.0f)
         val DEF_META = Group(0.50f, 0.84f, 1.0f)

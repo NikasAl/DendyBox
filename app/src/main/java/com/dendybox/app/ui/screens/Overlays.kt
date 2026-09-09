@@ -1,6 +1,9 @@
 package com.dendybox.app.ui.screens
 
 import android.graphics.BitmapFactory
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -48,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.dendybox.app.saves.SaveManager
 import com.dendybox.app.settings.SettingsStore
@@ -315,7 +319,44 @@ fun EditBar(
     onSelectGroup: (LayoutStore.GroupId) -> Unit,
     onDone: () -> Unit
 ) {
+    val context = LocalContext.current
     val g = store.group(selected)
+
+    fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+
+    // Экспорт/импорт раскладки в JSON (SAF): перенести настройку между сборками
+    // или превратить её в заводской дефолт (scripts/layout_to_defaults.py)
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                out.write(store.toJson().toByteArray(Charsets.UTF_8))
+            } ?: error("нет потока")
+            toast("Раскладка сохранена")
+        } catch (_: Exception) {
+            toast("Не удалось сохранить файл")
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            val text = context.contentResolver.openInputStream(uri)?.use { inp ->
+                inp.readBytes().toString(Charsets.UTF_8)
+            }
+            if (text != null && store.applyJson(text)) {
+                toast("Раскладка применена")
+            } else {
+                toast("Это не файл раскладки DendyBox")
+            }
+        } catch (_: Exception) {
+            toast("Не удалось прочитать файл")
+        }
+    }
+
     Surface(
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
         shadowElevation = 6.dp,
@@ -331,8 +372,19 @@ fun EditBar(
                 Text(
                     "Настройки управления",
                     style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
                     modifier = Modifier.weight(1f)
                 )
+                TextButton(onClick = { exportLauncher.launch("dendybox_layout.json") }) {
+                    Text("Экспорт")
+                }
+                TextButton(onClick = {
+                    importLauncher.launch(
+                        arrayOf("application/json", "text/plain", "application/octet-stream")
+                    )
+                }) {
+                    Text("Импорт")
+                }
                 TextButton(onClick = { store.resetAll() }) { Text("Сбросить") }
                 Spacer(Modifier.width(4.dp))
                 Button(onClick = onDone) { Text("Готово") }
