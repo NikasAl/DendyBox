@@ -341,6 +341,20 @@ Java_com_dendybox_app_Native_setInput(JNIEnv* /*env*/, jobject /*thiz*/,
     g_input[1].store(static_cast<uint32_t>(p2), std::memory_order_relaxed);
 }
 
+// FNV-1a (32 бита) по системной RAM консоли — контроль рассинхрона в netplay.
+// Обе стороны считают его по одинаковому состоянию; расхождение = десинк.
+JNIEXPORT jint JNICALL
+Java_com_dendybox_app_Native_ramCrc(JNIEnv* /*env*/, jobject /*thiz*/) {
+    uint32_t h = 2166136261u;
+    if (g_ram != nullptr && g_ram_size > 0) {
+        for (size_t i = 0; i < g_ram_size; ++i) {
+            h ^= static_cast<uint32_t>(g_ram[i]);
+            h *= 16777619u;
+        }
+    }
+    return static_cast<jint>(h);
+}
+
 JNIEXPORT void JNICALL
 Java_com_dendybox_app_Native_setPixelBuffer(JNIEnv* env, jobject /*thiz*/, jobject buf) {
     g_pix = static_cast<uint16_t*>(env->GetDirectBufferAddress(buf));

@@ -82,8 +82,14 @@ fun PauseOverlay(
     onCheats: () -> Unit,
     onEdit: () -> Unit,
     onSettings: () -> Unit,
-    onExit: () -> Unit
+    onNet: () -> Unit,
+    onExit: () -> Unit,
+    netLocked: Boolean = false,
+    onNetBlocked: () -> Unit = {}
 ) {
+    // В сетевой игре сейвы и читы разрушили бы синхронизацию — недоступны
+    fun guarded(action: () -> Unit): () -> Unit =
+        if (netLocked) onNetBlocked else action
     Box(
         Modifier
             .fillMaxSize()
@@ -100,13 +106,17 @@ fun PauseOverlay(
                 Text("Пауза", style = MaterialTheme.typography.headlineSmall)
                 MenuButton("Продолжить", onResume)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    MenuButton("Квик-сейв", onQuickSave, Modifier.weight(1f))
-                    MenuButton("Квик-лоад", onQuickLoad, Modifier.weight(1f))
+                    MenuButton("Квик-сейв", guarded(onQuickSave), Modifier.weight(1f))
+                    MenuButton("Квик-лоад", guarded(onQuickLoad), Modifier.weight(1f))
                 }
-                MenuButton("Слоты сохранений", onSlots)
-                MenuButton("Читы", onCheats)
+                MenuButton("Слоты сохранений", guarded(onSlots))
+                MenuButton("Читы", guarded(onCheats))
                 MenuButton("Настройки управления", onEdit)
                 MenuButton("Настройки", onSettings)
+                MenuButton(
+                    if (netLocked) "Отключить сетевую игру" else "Игра по сети (2 игрока)",
+                    onNet
+                )
                 OutlinedButton(onClick = onExit, modifier = Modifier.fillMaxWidth()) {
                     Text("Выход из игры")
                 }
@@ -255,6 +265,7 @@ fun SettingsPanel(onBack: () -> Unit, onSoundChange: (Boolean) -> Unit) {
         val haptics by SettingsStore.haptics.collectAsState()
         val dpadSize by SettingsStore.dpadSize.collectAsState()
         val opacity by SettingsStore.controlsOpacity.collectAsState()
+        val twoLocal by SettingsStore.twoLocal.collectAsState()
 
         SettingSlider(
             "Турбо-кнопка A′ — частота автоповтора: %d Гц".format(turboA.toInt()),
@@ -275,6 +286,17 @@ fun SettingsPanel(onBack: () -> Unit, onSoundChange: (Boolean) -> Unit) {
 
         SettingSwitch("Звук", sound) { SettingsStore.setSound(it); onSoundChange(it) }
         SettingSwitch("Вибро-отклик крестовины", haptics) { SettingsStore.setHaptics(it) }
+        SettingSwitch(
+            "2 игрока на одном экране",
+            twoLocal
+        ) { SettingsStore.setTwoLocal(it) }
+        Text(
+            "Режим «2 игрока»: на экране появляется второй джойстик (P2 справа). " +
+                "Позиции подстроятся один раз автоматически, дальше их можно " +
+                "поменять в редакторе управления. Для игры по сети этот режим не нужен.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -317,7 +339,8 @@ fun EditBar(
     store: LayoutStore,
     selected: LayoutStore.GroupId,
     onSelectGroup: (LayoutStore.GroupId) -> Unit,
-    onDone: () -> Unit
+    onDone: () -> Unit,
+    showP2: Boolean = false
 ) {
     val context = LocalContext.current
     val g = store.group(selected)
@@ -394,7 +417,12 @@ fun EditBar(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.horizontalScroll(rememberScrollState())
             ) {
-                LayoutStore.GroupId.entries.forEach { gid ->
+                val chipIds = if (showP2) LayoutStore.GroupId.entries else listOf(
+                    LayoutStore.GroupId.DPAD,
+                    LayoutStore.GroupId.AB,
+                    LayoutStore.GroupId.META
+                )
+                chipIds.forEach { gid ->
                     FilterChip(
                         selected = gid == selected,
                         onClick = { onSelectGroup(gid) },

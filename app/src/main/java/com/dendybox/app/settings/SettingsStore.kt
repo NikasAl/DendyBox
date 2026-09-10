@@ -16,6 +16,7 @@ object SettingsStore {
     val haptics = MutableStateFlow(true)      // вибро-отклик крестовины
     val dpadSize = MutableStateFlow(58f)      // радиус крестовины, dp
     val controlsOpacity = MutableStateFlow(0.55f) // прозрачность кнопок
+    val twoLocal = MutableStateFlow(false)    // локальный режим «2 игрока» на одном экране
 
     fun init(ctx: Context) {
         if (this::prefs.isInitialized) return
@@ -26,6 +27,7 @@ object SettingsStore {
         haptics.value = prefs.getBoolean("haptics", true)
         dpadSize.value = prefs.getFloat("dpadSize", 58f)
         controlsOpacity.value = prefs.getFloat("controlsOpacity", 0.55f)
+        twoLocal.value = prefs.getBoolean("twoLocal", false)
     }
 
     fun setTurboHzA(v: Float) { turboHzA.value = v; edit().putFloat("turboHzA", v) }
@@ -34,6 +36,7 @@ object SettingsStore {
     fun setHaptics(v: Boolean) { haptics.value = v; edit().putBoolean("haptics", v) }
     fun setDpadSize(v: Float) { dpadSize.value = v; edit().putFloat("dpadSize", v) }
     fun setControlsOpacity(v: Float) { controlsOpacity.value = v; edit().putFloat("controlsOpacity", v) }
+    fun setTwoLocal(v: Boolean) { twoLocal.value = v; edit().putBoolean("twoLocal", v) }
 
     private fun edit() = prefs.edit()
 }

@@ -3,11 +3,13 @@ package com.dendybox.app.input
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Состояние ввода P1. Биты соответствуют RETRO_DEVICE_ID_JOYPAD_*,
- * чтобы натив передавал их ядру без перекодировки.
+ * Состояние ввода ДВУХ портов (P1 и P2 — локальный 2P и сетевая игра).
+ * Биты соответствуют RETRO_DEVICE_ID_JOYPAD_*, чтобы натив передавал их
+ * ядру без перекодировки.
  *
  * Турбо считается по номеру кадра (не по таймеру): инпут — чистая функция
- * от кадра, это пригодится при добавлении netplay (этап 5).
+ * от кадра, поэтому в netplay каждая сторона сама считает турбо СВОЕГО
+ * порта и шлёт пир уже готовые биты — расхождения невозможны.
  */
 object InputState {
     const val B = 1 shl 0      // RETRO_DEVICE_ID_JOYPAD_B  -> кнопка B NES
@@ -23,39 +25,47 @@ object InputState {
 
     const val DIR_MASK = UP or DOWN or LEFT or RIGHT
 
-    private val p1 = AtomicInteger(0)
+    private val ports = arrayOf(AtomicInteger(0), AtomicInteger(0))
 
-    fun press(bit: Int, down: Boolean) {
-        p1.updateAndGet { cur -> if (down) cur or bit else cur and bit.inv() }
+    private fun idx(port: Int) = if (port == 1) 1 else 0
+
+    fun press(bit: Int, down: Boolean, port: Int = 0) {
+        ports[idx(port)].updateAndGet { cur -> if (down) cur or bit else cur and bit.inv() }
     }
 
     /** Установить направления крестовины (остальные биты не трогает). */
-    fun setDirs(bits: Int) {
-        p1.updateAndGet { cur -> (cur and DIR_MASK.inv()) or bits }
+    fun setDirs(bits: Int, port: Int = 0) {
+        ports[idx(port)].updateAndGet { cur -> (cur and DIR_MASK.inv()) or bits }
     }
 
+    /** Сырая маска порта (для отладки/статуса). */
+    fun raw(port: Int = 0): Int = ports[idx(port)].get()
+
     fun clearAll() {
-        p1.set(0)
+        ports[0].set(0)
+        ports[1].set(0)
         turboActiveA = false
         turboActiveB = false
     }
 
-    // --- Турбо ---
+    // --- Турбо (только P1: у блока P2 турбо-кнопок нет) ---
     var turboHzA = 14f
     var turboHzB = 14f
     @Volatile var turboActiveA = false
     @Volatile var turboActiveB = false
 
-    /** Итоговая маска для кадра [frame]. */
-    fun compose(frame: Long, fps: Double): Int {
-        var m = p1.get()
-        if (turboActiveA) {
-            val half = (fps / (2.0 * turboHzA)).toInt().coerceAtLeast(1)
-            if (frame / half % 2 == 0L) m = m or A
-        }
-        if (turboActiveB) {
-            val half = (fps / (2.0 * turboHzB)).toInt().coerceAtLeast(1)
-            if (frame / half % 2 == 0L) m = m or B
+    /** Итоговая маска порта [port] для кадра [frame]. */
+    fun compose(frame: Long, fps: Double, port: Int = 0): Int {
+        var m = ports[idx(port)].get()
+        if (port == 0) {
+            if (turboActiveA) {
+                val half = (fps / (2.0 * turboHzA)).toInt().coerceAtLeast(1)
+                if (frame / half % 2 == 0L) m = m or A
+            }
+            if (turboActiveB) {
+                val half = (fps / (2.0 * turboHzB)).toInt().coerceAtLeast(1)
+                if (frame / half % 2 == 0L) m = m or B
+            }
         }
         return m
     }

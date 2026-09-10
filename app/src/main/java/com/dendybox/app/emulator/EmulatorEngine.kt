@@ -15,9 +15,11 @@ import android.view.SurfaceHolder
 import android.widget.Toast
 import com.dendybox.app.Native
 import com.dendybox.app.input.InputState
+import com.dendybox.app.net.NetSession
 import com.dendybox.app.saves.SaveManager
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.concurrent.thread
 import kotlin.math.floor
@@ -63,6 +65,77 @@ class EmulatorEngine(private val context: Context) {
     var saves: SaveManager? = null
         private set
 
+    /** SHA-256 загруженного ROM — сверяется при подключении в сетевой игре. */
+    var romSha256: String = ""
+        private set
+
+    // --- Сетевая игра (lockstep) ---
+    @Volatile private var netSession: NetSession? = null
+    @Volatile private var netLocalPort = 0
+    // Штатный локальный разрыв связи: обрыв сокета не считается ошибкой —
+    // игра продолжается соло без паузы (см. обработчик catch в loop())
+    @Volatile private var netGracefulDetach = false
+
+    fun isNetActive(): Boolean = netSession != null
+
+    /** Порт локального игрока в сетевой игре (хост — 0, гость — 1). */
+    fun netLocalPort(): Int = netLocalPort
+
+    /** Включить сетевой режим (вызывается из потока эмуляции, кадры с нуля). */
+    fun attachNet(session: NetSession, localPort: Int) = runOnLoop {
+        netSession = session
+        netLocalPort = localPort
+        frameIndex = 0
+    }
+
+    /** Выключить сетевой режим (после обрыва/выхода). */
+    fun detachNet() = runOnLoop { netSession = null }
+
+    /**
+     * Штатное отключение по инициативе локального игрока (кнопка «Отключить
+     * сетевую игру»): закрываем сессию и продолжаем игру соло — без паузы и
+     * без уведомления об ошибке. Пир при этом получит обрыв и станет на паузу.
+     */
+    fun disconnectNet() {
+        netGracefulDetach = true
+        // 1) закрыть сокет — будит поток кадра, если он ждёт ввода пира;
+        // 2) очистить состояние в потоке эмуляции (и снять флаг там же,
+        //    чтобы не «проглотить» будущий настоящий обрыв связи)
+        try { netSession?.requestClose(null) } catch (_: Exception) {}
+        runOnLoop {
+            netSession = null
+            netGracefulDetach = false
+        }
+    }
+
+    /**
+     * Снять сейв-стейт в потоке эмуляции и вернуть его в [cb] (главный поток).
+     * Используется для синхронизации перед началом сетевой игры.
+     */
+    fun captureState(cb: (ByteArray?) -> Unit) = runOnLoop {
+        val size = Native.stateSize()
+        if (size <= 0) {
+            main.post { cb(null) }
+            return@runOnLoop
+        }
+        val bb = ByteBuffer.allocateDirect(size)
+        if (!Native.saveState(bb)) {
+            main.post { cb(null) }
+            return@runOnLoop
+        }
+        bb.rewind()
+        val arr = ByteArray(size)
+        bb.get(arr)
+        main.post { cb(arr) }
+    }
+
+    /** Загрузить сейв-стейт в потоке эмуляции; результат — в [cb] (главный поток). */
+    fun applyState(bytes: ByteArray, cb: (Boolean) -> Unit) = runOnLoop {
+        val bb = ByteBuffer.allocateDirect(bytes.size).put(bytes)
+        bb.flip()
+        main.post { cb(Native.loadState(bb)) }
+    }
+
     /** Запуск. null — успех, иначе текст ошибки для показа пользователю. */
     fun start(rom: ByteArray): String? {
         if (running) return null
@@ -78,6 +151,9 @@ class EmulatorEngine(private val context: Context) {
                 "Проверьте файл: ./scripts/check_rom.sh roms/<имя_рома>.nes\n" +
                 "Подробная причина — в logcat по тегу «DendyBox» (./scripts/run.sh log)."
         }
+        romSha256 = MessageDigest.getInstance("SHA-256")
+            .digest(rom)
+            .joinToString("") { "%02x".format(it) }
 
         saves = SaveManager(context, SaveManager.sha1(rom))
         fps = Native.avFps()
@@ -158,6 +234,9 @@ class EmulatorEngine(private val context: Context) {
     fun stop() {
         running = false
         audioRunning = false
+        // Сетевая сессия может держать поток кадра в blocking-чтении —
+        // закрываем сокет, чтобы join не повис
+        try { netSession?.requestClose(null) } catch (_: Exception) {}
         // Если аудиопоток застрял в blocking write — возобновляем дорожку,
         // чтобы join не повис: играющая дорожка потребляет буфер и write завершится
         try { audioTrack?.play() } catch (_: Exception) {}
@@ -193,7 +272,33 @@ class EmulatorEngine(private val context: Context) {
                 continue
             }
 
-            Native.setInput(InputState.compose(frameIndex, fps), 0)
+            // --- ВВОД ---
+            val ns = netSession
+            if (ns != null) {
+                // Lockstep: кадр N нельзя эмулировать, пока не пришёл ввод пира
+                // для этого кадра. Свои биты шлём вперёд (пир применит их
+                // через DELAY_FRAMES кадров — это джиттер-буфер).
+                val local = InputState.compose(frameIndex, fps, netLocalPort)
+                val remote = try {
+                    ns.exchangeWait(frameIndex, local) { Native.ramCrc() }
+                } catch (e: Exception) {
+                    // Штатный локальный разрыв — продолжаем соло без паузы;
+                    // иначе связь потеряна/рассинхрон: пауза + уведомление
+                    // пользователя через колбэк сессии (главный поток)
+                    netSession = null
+                    if (netGracefulDetach) {
+                        netGracefulDetach = false
+                    } else {
+                        paused = true
+                        ns.fail(if (e.message.isNullOrBlank()) "Соединение потеряно" else e.message!!)
+                    }
+                    continue
+                }
+                if (netLocalPort == 0) Native.setInput(local, remote)
+                else Native.setInput(remote, local)
+            } else {
+                Native.setInput(InputState.compose(frameIndex, fps, 0), 0)
+            }
             Native.runFrame()
 
             frameBitmap?.let { bmp ->

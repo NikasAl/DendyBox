@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,12 +43,13 @@ import com.dendybox.app.cheats.CheatRepository
 import com.dendybox.app.emulator.EmulatorEngine
 import com.dendybox.app.input.InputState
 import com.dendybox.app.saves.SaveManager
+import com.dendybox.app.settings.SettingsStore
 import com.dendybox.app.ui.controls.ControlsLayer
 import com.dendybox.app.ui.controls.DpadLayer
 import com.dendybox.app.ui.controls.EditorSurface
 import com.dendybox.app.ui.controls.LayoutStore
 
-enum class Screen { GAME, PAUSE, SLOTS, CHEATS, SETTINGS, EDIT }
+enum class Screen { GAME, PAUSE, SLOTS, CHEATS, SETTINGS, EDIT, NET }
 
 @Composable
 fun GameScreen(
@@ -68,6 +71,13 @@ fun GameScreen(
 
     // Какой блок редактируется (выделяется касанием, масштаб — слайдером/щипком)
     var editTarget by remember { mutableStateOf(LayoutStore.GroupId.DPAD) }
+
+    // Локальный режим «2 игрока» — второй джойстик на том же экране
+    val twoLocal by SettingsStore.twoLocal.collectAsState()
+    LaunchedEffect(twoLocal) {
+        // при первом включении — один раз расставить P1 слева / P2 справа
+        if (twoLocal) layoutStore.applyTwoPresetOnce()
+    }
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
 
@@ -92,6 +102,9 @@ fun GameScreen(
         )
 
         if (started && screen == Screen.GAME) {
+            val netLocked = engine.isNetActive()
+            // В сетевой игре весь локальный ввод идёт в порт своей стороны
+            val myPort = if (netLocked) engine.netLocalPort() else 0
             // Верхняя панель: пауза слева, квик-сейв/лоад справа
             Row(
                 Modifier
@@ -104,26 +117,41 @@ fun GameScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     CircleIcon(Icons.Filled.Tune, "Настройки управления") { onScreen(Screen.EDIT) }
                     CircleIcon(Icons.Filled.Save, "Квик-сейв") {
-                        engine.saveSlot(SaveManager.QUICK) { ok ->
+                        if (netLocked) toast("В сетевой игре сейвы недоступны")
+                        else engine.saveSlot(SaveManager.QUICK) { ok ->
                             toast(if (ok) "Сохранено" else "Ошибка сохранения")
                         }
                     }
                     CircleIcon(Icons.Filled.FolderOpen, "Квик-лоад") {
-                        engine.loadSlot(SaveManager.QUICK) { ok ->
+                        if (netLocked) toast("В сетевой игре сейвы недоступны")
+                        else engine.loadSlot(SaveManager.QUICK) { ok ->
                             toast(if (ok) "Загружено" else "Сейв не найден")
                         }
                     }
                 }
             }
 
-            // Крестовина: всегда видима на фиксированном месте
+            // Джойстик P1 (в сетевой игре — джойстик своей стороны)
             DpadLayer(
                 store = layoutStore,
                 editing = false,
                 enabled = true,
-                onBits = { InputState.setDirs(it) }
+                onBits = { InputState.setDirs(it, myPort) }
             )
-            ControlsLayer(store = layoutStore, editing = false)
+            ControlsLayer(store = layoutStore, editing = false, inputPort = myPort)
+
+            // Второй джойстик для локальной игры на двоих (по сети он не нужен —
+            // второй игрок играет со своего телефона)
+            if (twoLocal && !netLocked) {
+                DpadLayer(
+                    store = layoutStore,
+                    editing = false,
+                    enabled = true,
+                    onBits = { InputState.setDirs(it, 1) },
+                    p2Style = true
+                )
+                ControlsLayer(store = layoutStore, editing = false, inputPort = 1, p2Style = true)
+            }
         }
 
         // Редактор управления: игра на паузе; тяните блок или пустое место —
@@ -151,6 +179,24 @@ fun GameScreen(
                     selected = editTarget,
                     onSelect = { editTarget = it }
                 )
+                if (twoLocal) {
+                    DpadLayer(
+                        store = layoutStore,
+                        editing = true,
+                        selected = editTarget,
+                        onSelect = { editTarget = LayoutStore.GroupId.DPAD2 },
+                        enabled = false,
+                        onBits = {},
+                        p2Style = true
+                    )
+                    ControlsLayer(
+                        store = layoutStore,
+                        editing = true,
+                        selected = editTarget,
+                        onSelect = { editTarget = it },
+                        p2Style = true
+                    )
+                }
                 Box(
                     Modifier
                         .align(Alignment.TopStart)
@@ -161,7 +207,8 @@ fun GameScreen(
                         store = layoutStore,
                         selected = editTarget,
                         onSelectGroup = { editTarget = it },
-                        onDone = { onScreen(Screen.GAME) }
+                        onDone = { onScreen(Screen.GAME) },
+                        showP2 = twoLocal
                     )
                 }
             }
@@ -186,7 +233,38 @@ fun GameScreen(
                 onCheats = { onScreen(Screen.CHEATS) },
                 onEdit = { onScreen(Screen.EDIT) },
                 onSettings = { onScreen(Screen.SETTINGS) },
-                onExit = onExit
+                onNet = {
+                    InputState.clearAll()
+                    if (engine.isNetActive()) {
+                        // Повторный вход в меню сети во время сетевой игры =
+                        // отключение: продолжаем соло, пир станет на паузу
+                        engine.disconnectNet()
+                        onScreen(Screen.GAME)
+                        engine.setPaused(false)
+                        toast("Сетевая игра завершена")
+                    } else {
+                        engine.setPaused(true)
+                        onScreen(Screen.NET)
+                    }
+                },
+                onExit = onExit,
+                netLocked = engine.isNetActive(),
+                onNetBlocked = { toast("В сетевой игре сейвы и читы недоступны") }
+            )
+
+            Screen.NET -> NetPanel(
+                engine = engine,
+                onBack = { onScreen(Screen.PAUSE) },
+                onStarted = {
+                    onScreen(Screen.GAME)
+                    engine.setPaused(false)
+                },
+                onDisconnect = { msg ->
+                    toast(msg)
+                    engine.detachNet()
+                    engine.setPaused(true)
+                    onScreen(Screen.PAUSE)
+                }
             )
 
             Screen.SLOTS -> SlotsPanel(

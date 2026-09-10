@@ -68,6 +68,12 @@ val SPECS_AB = listOf(
     CtrlSpec("A", "A", 36f, 0f, 64f)
 )
 
+/** Кластер A/B второго игрока — только основные кнопки, без турбо. */
+val SPECS_AB2 = listOf(
+    CtrlSpec("B", "B", -36f, 0f, 64f),
+    CtrlSpec("A", "A", 36f, 0f, 64f)
+)
+
 /** Select / Start — отдельная группа: двигается и масштабируется независимо. */
 val SPECS_META = listOf(
     CtrlSpec("SELECT", "SEL", -29f, 0f, 46f),
@@ -76,8 +82,9 @@ val SPECS_META = listOf(
 
 private fun specsOf(id: LayoutStore.GroupId): List<CtrlSpec> = when (id) {
     LayoutStore.GroupId.AB -> SPECS_AB
+    LayoutStore.GroupId.AB2 -> SPECS_AB2
     LayoutStore.GroupId.META -> SPECS_META
-    LayoutStore.GroupId.DPAD -> emptyList()
+    LayoutStore.GroupId.DPAD, LayoutStore.GroupId.DPAD2 -> emptyList()
 }
 
 /**
@@ -92,9 +99,10 @@ private fun specsOf(id: LayoutStore.GroupId): List<CtrlSpec> = when (id) {
 data class Extents(val left: Float, val top: Float, val right: Float, val bottom: Float)
 
 fun extentsDp(id: LayoutStore.GroupId, dpadBaseRadiusDp: Float): Extents = when (id) {
-    LayoutStore.GroupId.AB -> Extents(left = 68f, top = 81f, right = 68f, bottom = 32f)
+    LayoutStore.GroupId.AB, LayoutStore.GroupId.AB2 ->
+        Extents(left = 68f, top = 81f, right = 68f, bottom = 32f)
     LayoutStore.GroupId.META -> Extents(left = 52f, top = 23f, right = 52f, bottom = 23f)
-    LayoutStore.GroupId.DPAD -> Extents(
+    LayoutStore.GroupId.DPAD, LayoutStore.GroupId.DPAD2 -> Extents(
         left = dpadBaseRadiusDp,
         top = dpadBaseRadiusDp,
         right = dpadBaseRadiusDp,
@@ -102,14 +110,15 @@ fun extentsDp(id: LayoutStore.GroupId, dpadBaseRadiusDp: Float): Extents = when 
     )
 }
 
-private fun handlePress(id: String, down: Boolean) {
+/** Кнопка [id] нажата на порту [port] (турбо — только P1). */
+private fun handlePress(id: String, down: Boolean, port: Int) {
     when (id) {
-        "A" -> InputState.press(InputState.A, down)
-        "B" -> InputState.press(InputState.B, down)
-        "TA" -> InputState.turboActiveA = down
-        "TB" -> InputState.turboActiveB = down
-        "SELECT" -> InputState.press(InputState.SELECT, down)
-        "START" -> InputState.press(InputState.START, down)
+        "A" -> InputState.press(InputState.A, down, port)
+        "B" -> InputState.press(InputState.B, down, port)
+        "TA" -> if (port == 0) InputState.turboActiveA = down
+        "TB" -> if (port == 0) InputState.turboActiveB = down
+        "SELECT" -> InputState.press(InputState.SELECT, down, port)
+        "START" -> InputState.press(InputState.START, down, port)
     }
 }
 
@@ -235,7 +244,11 @@ private fun GroupFrame(
 }
 
 // ---------------------------------------------------------------------------
-// Слой кнопок: кластер A/B (турбо сверху) и отдельный Select/Start
+// Слой кнопок. Параметры:
+//  [inputPort] — в какой порт джойстика пишутся нажатия (0 — P1; в сетевой
+//  игре гость передаёт 1, при этом раскладка остаётся обычной);
+//  [p2Style] — рисовать ВТОРОЙ набор (кластер AB2 без турбо, без Select/Start)
+//  для локальной игры на двоих на одном экране.
 // ---------------------------------------------------------------------------
 
 @Composable
@@ -243,13 +256,20 @@ fun ControlsLayer(
     store: LayoutStore,
     editing: Boolean,
     selected: LayoutStore.GroupId = LayoutStore.GroupId.AB,
-    onSelect: (LayoutStore.GroupId) -> Unit = {}
+    onSelect: (LayoutStore.GroupId) -> Unit = {},
+    inputPort: Int = 0,
+    p2Style: Boolean = false
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val parentPx = IntSize(constraints.maxWidth, constraints.maxHeight)
         val density = LocalDensity.current
 
-        listOf(LayoutStore.GroupId.AB, LayoutStore.GroupId.META).forEach { gid ->
+        val groups = if (p2Style) {
+            listOf(LayoutStore.GroupId.AB2)
+        } else {
+            listOf(LayoutStore.GroupId.AB, LayoutStore.GroupId.META)
+        }
+        groups.forEach { gid ->
             val g = store.group(gid) // чтение state — рекомпозиция при изменении
             val cx = g.x * parentPx.width
             val cy = g.y * parentPx.height
@@ -294,8 +314,9 @@ fun ControlsLayer(
                         parentPx = parentPx,
                         density = density,
                         editing = editing,
+                        inputPort = inputPort,
                         onSelect = { onSelect(gid) },
-                        onPress = { down -> handlePress(spec.id, down) }
+                        onPress = { down -> handlePress(spec.id, down, inputPort) }
                     )
                 }
             }
@@ -314,6 +335,7 @@ private fun GameButton(
     parentPx: IntSize,
     density: Density,
     editing: Boolean,
+    inputPort: Int,
     onSelect: () -> Unit,
     onPress: (Boolean) -> Unit
 ) {
@@ -403,6 +425,7 @@ private class DpadState {
  * Крестовина на фиксированном месте: 8 направлений (сектора по 45°)
  * с мёртвой зоной и гистерезисом. Видима всегда; зона касания — квадрат
  * 1.45×R вокруг центра, чтобы не нужно было попадать точно в стрелку.
+ * [p2Style] — второй набор (группа DPAD2) для локальной игры на двоих.
  *
  * В редакторе: тап — выделить, перетаскивание — передвинуть.
  */
@@ -413,12 +436,14 @@ fun DpadLayer(
     selected: LayoutStore.GroupId = LayoutStore.GroupId.DPAD,
     onSelect: (LayoutStore.GroupId) -> Unit = {},
     enabled: Boolean,
-    onBits: (Int) -> Unit
+    onBits: (Int) -> Unit,
+    p2Style: Boolean = false
 ) {
+    val gid = if (p2Style) LayoutStore.GroupId.DPAD2 else LayoutStore.GroupId.DPAD
     val view = LocalView.current
     val density = LocalDensity.current
     val dpadBaseR by SettingsStore.dpadSize.collectAsState()
-    val g = store.dpad // recomposition при изменении позиции/масштаба
+    val g = store.group(gid) // recomposition при изменении позиции/масштаба
     val st = remember { DpadState() }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -438,16 +463,16 @@ fun DpadLayer(
                         editing -> Modifier
                             .pointerInput(parentPx) {
                                 detectTapGestures(
-                                    onTap = { onSelect(LayoutStore.GroupId.DPAD) }
+                                    onTap = { onSelect(gid) }
                                 )
                             }
                             .pointerInput(parentPx, dpadBaseR) {
                                 detectDragGestures(
-                                    onDragStart = { onSelect(LayoutStore.GroupId.DPAD) },
+                                    onDragStart = { onSelect(gid) },
                                     onDrag = { change, dragAmount ->
                                         change.consume()
                                         moveGroupBy(
-                                            store, LayoutStore.GroupId.DPAD,
+                                            store, gid,
                                             dragAmount.x, dragAmount.y, 1f,
                                             parentPx, density, dpadBaseR
                                         )
@@ -531,12 +556,12 @@ fun DpadLayer(
                 topPx = rPx,
                 rightPx = rPx,
                 bottomPx = rPx,
-                label = LayoutStore.title(LayoutStore.GroupId.DPAD),
-                selected = selected == LayoutStore.GroupId.DPAD,
-                onSelect = { onSelect(LayoutStore.GroupId.DPAD) },
+                label = LayoutStore.title(gid),
+                selected = selected == gid,
+                onSelect = { onSelect(gid) },
                 onDragPx = { dx, dy ->
                     moveGroupBy(
-                        store, LayoutStore.GroupId.DPAD, dx, dy, 1f,
+                        store, gid, dx, dy, 1f,
                         parentPx, density, dpadBaseR
                     )
                 }

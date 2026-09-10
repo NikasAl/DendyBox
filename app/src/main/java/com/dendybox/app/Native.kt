@@ -24,6 +24,9 @@ object Native {
     /** Битовые маски кнопок (libretro: B=1<<0, A=1<<8, см. InputState). */
     external fun setInput(p1: Int, p2: Int)
 
+    /** FNV-1a системной RAM (2 КБ) — контроль рассинхрона в сетевой игре. */
+    external fun ramCrc(): Int
+
     /** Прямой буфер для кадра RGB565 (w*h*2 байт). */
     external fun setPixelBuffer(buf: ByteBuffer)
 
