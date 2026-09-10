@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -114,11 +116,15 @@ fun NetPanel(
             .background(Color.Black.copy(alpha = 0.65f)),
         contentAlignment = Alignment.Center
     ) {
-        Surface(shape = RoundedCornerShape(20.dp)) {
+        Surface(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            shape = RoundedCornerShape(20.dp)
+        ) {
             Column(
                 Modifier
-                    .padding(24.dp)
-                    .width(360.dp),
+                    .width(360.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text("Игра по сети", style = MaterialTheme.typography.headlineSmall)

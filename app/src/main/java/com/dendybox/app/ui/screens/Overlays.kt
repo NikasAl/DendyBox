@@ -96,16 +96,22 @@ fun PauseOverlay(
             .background(Color.Black.copy(alpha = 0.65f)),
         contentAlignment = Alignment.Center
     ) {
-        Surface(shape = RoundedCornerShape(20.dp)) {
+        Surface(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            shape = RoundedCornerShape(20.dp)
+        ) {
+            // Скролл обязателен: в ландшафте высота экрана мала, пунктов меню
+            // много — без него нижние кнопки (сеть, выход) уходят за край
             Column(
                 Modifier
-                    .padding(24.dp)
-                    .width(300.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .width(300.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text("Пауза", style = MaterialTheme.typography.headlineSmall)
                 MenuButton("Продолжить", onResume)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MenuButton("Квик-сейв", guarded(onQuickSave), Modifier.weight(1f))
                     MenuButton("Квик-лоад", guarded(onQuickLoad), Modifier.weight(1f))
                 }
