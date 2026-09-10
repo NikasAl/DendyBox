@@ -275,11 +275,14 @@ class EmulatorEngine(private val context: Context) {
             // --- ВВОД ---
             val ns = netSession
             if (ns != null) {
-                // Lockstep: кадр N нельзя эмулировать, пока не пришёл ввод пира
-                // для этого кадра. Свои биты шлём вперёд (пир применит их
-                // через DELAY_FRAMES кадров — это джиттер-буфер).
+                // Lockstep: кадр N нельзя эмулировать, пока не пришёл ввод пира.
+                // Свои биты шлём вперёд, но применяем — как и биты пира — ввод
+                // кадра N - DELAY_FRAMES: NetSession задерживает СВОЙ ввод
+                // локальной очередью так же, как пира джиттер-буфером. Только
+                // так обе машины исполняют одинаковый поток ввода (иначе любая
+                // смена кнопок — мгновенный рассинхрон).
                 val local = InputState.compose(frameIndex, fps, netLocalPort)
-                val remote = try {
+                val inp = try {
                     ns.exchangeWait(frameIndex, local) { Native.ramCrc() }
                 } catch (e: Exception) {
                     // Штатный локальный разрыв — продолжаем соло без паузы;
@@ -294,8 +297,8 @@ class EmulatorEngine(private val context: Context) {
                     }
                     continue
                 }
-                if (netLocalPort == 0) Native.setInput(local, remote)
-                else Native.setInput(remote, local)
+                if (netLocalPort == 0) Native.setInput(inp.local, inp.peer)
+                else Native.setInput(inp.peer, inp.local)
             } else {
                 Native.setInput(InputState.compose(frameIndex, fps, 0), 0)
             }

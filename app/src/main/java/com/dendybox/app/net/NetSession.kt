@@ -31,10 +31,16 @@ import kotlin.concurrent.thread
  *   хост  -> гость: GO — после этого обе стороны в бинарном покадровом обмене
  *
  * БИНАРНЫЙ ОБМЕН (после GO), на каждый кадр N:
- *   обе стороны шлют 2 байта — маску кнопок СВОЕГО джойстика (libretro-биты);
+ *   обе стороны шлют 2 байта — 16-битную маску кнопок СВОЕГО джойстика
+ *   (libretro-биты, СТАРШИЙ байт первым — так же, как readShort/readInt);
  *   каждый 120-й кадр дополнительно 4 байта — FNV-1a RAM (контроль десинка).
- *   Ввод применяется с задержкой DELAY_FRAMES кадров — это джиттер-буфер:
- *   при коротких замираниях сети кадры продолжают идти из буфера.
+ *   Ввод кадра N — СВОЙ И ПИРА — применяется на ОБЕИХ машинах на кадре
+ *   N + DELAY_FRAMES: свой — через локальную очередь задержки (localBuf),
+ *   пира — через джиттер-буфер. Оба эмулятора получают байт-в-байт одинаковый
+ *   поток ввода; при коротких замираниях сети кадры продолжают идти из буфера.
+ *   (Задерживать только пира нельзя: тогда хост исполняет кадр N как
+ *   (свой[N], пир[N-3]), а гость как (хост[N-3], свой[N]) — потоки разные
+ *   и любая смена кнопок даёт мгновенный десинк.)
  *   CRC пира сверяется в момент чтения из потока против СОБСТВЕННОГО CRC того
  *   же кадра, снятого при отправке (см. localCrcs) — счёт ведётся по абсолютной
  *   позиции в потоке пира, чтобы джиттер-буфер не сдвигал кадры.
@@ -46,6 +52,12 @@ import kotlin.concurrent.thread
  */
 class DesyncException(val frame: Long) :
     IOException("Рассинхронизация (кадр $frame) — проверьте, что ROM и версия приложения одинаковые")
+
+/**
+ * Ввод для исполнения очередного кадра: свои биты и биты пира, оба кадра
+ * [frame - DELAY_FRAMES] (задержаны одинаково — см. шапку класса).
+ */
+class FrameInputs internal constructor(val local: Int, val peer: Int)
 
 class NetSession internal constructor(
     private val sock: Socket,
@@ -62,6 +74,9 @@ class NetSession internal constructor(
 
     // джиттер-буфер ввода пира: значения для кадров [head..head+size)
     private val buf = ArrayDeque<Int>()
+    // локальная очередь задержки СВОЕГО ввода — зеркало джиттер-буфера:
+    // применение своего ввода на тех же кадрах, что и ввода пира
+    private val localBuf = ArrayDeque<Int>()
     private var head = 0L
     // сколько шортов пира уже прочитано из потока (абсолютный счётчик);
     // шорт №k несёт ввод пира для кадра k, за контрольным (k % 120 == 119)
@@ -121,25 +136,31 @@ class NetSession internal constructor(
      */
     fun enterLockstep() {
         buf.clear()
+        localBuf.clear()
         head = 0
         peerRead = 0
         localCrcs.clear()
-        repeat(DELAY_FRAMES) { buf.addLast(0) }
+        repeat(DELAY_FRAMES) {
+            buf.addLast(0)       // ввод пира первых кадров — нули (задержка)
+            localBuf.addLast(0)  // свой ввод первых кадров — тоже нули
+        }
     }
 
     /**
-     * Обмен вводом кадра [frame]: отправить свои биты [localBits], вернуть биты
-     * пира для этого кадра (блокирует, если пир отстаёт). [ramCrc] — контрольная
-     * сумма локальной RAM. Бросает IOException/DesyncException при обрыве/десинке.
+     * Обмен вводом кадра [frame]: отправить свои биты [localBits], вернуть ввод
+     * для исполнения этого кадра — свои биты и биты пира кадра [frame - DELAY_FRAMES]
+     * (блокирует, если пир отстаёт). [ramCrc] — контрольная сумма локальной RAM.
+     * Бросает IOException/DesyncException при обрыве/десинке.
      */
-    fun exchangeWait(frame: Long, localBits: Int, ramCrc: () -> Int): Int {
+    fun exchangeWait(frame: Long, localBits: Int, ramCrc: () -> Int): FrameInputs {
         val isCheck = frame % CHECK_EVERY == CHECK_EVERY - 1L
 
-        // 1. Свои данные этого кадра — пиру (без ожидания). На контрольном
+        // 1. Свои данные этого кадра — пиру (без ожидания). Маска — старшим
+        //    байтом первым (readShort у пира читает именно так). На контрольном
         //    кадре — свой CRC RAM (состояние после frame-1 кадра, т.е. ровно
         //    frame исполненных кадров) и запоминаем его для сверки
-        dout.write(localBits and 0xFF)
         dout.write((localBits shr 8) and 0xFF)
+        dout.write(localBits and 0xFF)
         if (isCheck) {
             val c = ramCrc()
             localCrcs[frame] = c
@@ -151,7 +172,13 @@ class NetSession internal constructor(
         }
         dout.flush()
 
-        // 2. Если джиттер-буфер пересох (сеть отстаёт) — догоняем до текущего кадра
+        // 2. Свой ввод уходит в очередь задержки; исполнить нужно свой ввод
+        //    кадра frame - DELAY_FRAMES (пир применит то же самое на своём
+        //    кадре frame — потоки ввода обеих машин совпадают байт-в-байт)
+        val own = localBuf.pollFirst() ?: localBits
+        localBuf.addLast(localBits)
+
+        // 3. Если джиттер-буфер пересох (сеть отстаёт) — догоняем до текущего кадра
         while (head + buf.size <= frame) {
             buf.addLast(readShort())
             consumePeerCrc(ramCrc)
@@ -159,12 +186,12 @@ class NetSession internal constructor(
         val cur = buf.pollFirst() ?: throw EOFException("буфер ввода пуст")
         head++
 
-        // 3. Добираем джиттер-буфер вперёд (обычно ровно один шорт за кадр)
+        // 4. Добираем джиттер-буфер вперёд (обычно ровно один шорт за кадр)
         while (buf.size < DELAY_FRAMES) {
             buf.addLast(readShort())
             consumePeerCrc(ramCrc)
         }
-        return cur
+        return FrameInputs(own, cur)
     }
 
     /**
@@ -238,7 +265,7 @@ class NetSession internal constructor(
 
     companion object {
         const val PORT = 45901
-        const val PROTOCOL = 2
+        const val PROTOCOL = 3
         private const val DELAY_FRAMES = 3      // задержка ввода/джиттер-буфер, кадров
         private const val CHECK_EVERY = 120L    // контроль RAM каждые ~2 секунды
 
