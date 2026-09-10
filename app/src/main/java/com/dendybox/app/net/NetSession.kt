@@ -31,10 +31,13 @@ import kotlin.concurrent.thread
  *   хост  -> гость: GO — после этого обе стороны в бинарном покадровом обмене
  *
  * БИНАРНЫЙ ОБМЕН (после GO), на каждый кадр N:
- *   обе стороны шлют 2 байта — маска кнопок СВОЕГО джойстика (libretro-биты);
+ *   обе стороны шлют 2 байта — маску кнопок СВОЕГО джойстика (libretro-биты);
  *   каждый 120-й кадр дополнительно 4 байта — FNV-1a RAM (контроль десинка).
- *   Ввод применяется с задержкой DELAY_FRAMES кадров: это джиттер-буфер —
+ *   Ввод применяется с задержкой DELAY_FRAMES кадров — это джиттер-буфер:
  *   при коротких замираниях сети кадры продолжают идти из буфера.
+ *   CRC пира сверяется в момент чтения из потока против СОБСТВЕННОГО CRC того
+ *   же кадра, снятого при отправке (см. localCrcs) — счёт ведётся по абсолютной
+ *   позиции в потоке пира, чтобы джиттер-буфер не сдвигал кадры.
  *   Если буфер пуст и данных нет — обе стороны честно ждут (лаг вместо десинка).
  *
  * Детерминизм: одинаковый ROM (сверка SHA-256), одинаковое ядро (та же сборка
@@ -60,8 +63,14 @@ class NetSession internal constructor(
     // джиттер-буфер ввода пира: значения для кадров [head..head+size)
     private val buf = ArrayDeque<Int>()
     private var head = 0L
-    // CRC пира, прочитанные «впрок» при опережающем чтении (кадр -> crc)
-    private val pendingCrc = ArrayDeque<Pair<Long, Int>>()
+    // сколько шортов пира уже прочитано из потока (абсолютный счётчик);
+    // шорт №k несёт ввод пира для кадра k, за контрольным (k % 120 == 119)
+    // в потоке сразу следует 4-байтовый CRC RAM пира
+    private var peerRead = 0L
+    // свои CRC контрольных кадров (кадр -> CRC), снятые при отправке;
+    // peer CRC(k) приходит из потока на 0..3 кадров позже (джиттер-буфер),
+    // поэтому сверяем его с сохранённым значением того же кадра
+    private val localCrcs = HashMap<Long, Int>()
 
     // ------------------------------------------------------------------ //
     // Синхронизация перед игрой (фоновые потоки панели)
@@ -113,6 +122,8 @@ class NetSession internal constructor(
     fun enterLockstep() {
         buf.clear()
         head = 0
+        peerRead = 0
+        localCrcs.clear()
         repeat(DELAY_FRAMES) { buf.addLast(0) }
     }
 
@@ -124,11 +135,15 @@ class NetSession internal constructor(
     fun exchangeWait(frame: Long, localBits: Int, ramCrc: () -> Int): Int {
         val isCheck = frame % CHECK_EVERY == CHECK_EVERY - 1L
 
-        // 1. Свои данные этого кадра — пиру (без ожидания)
+        // 1. Свои данные этого кадра — пиру (без ожидания). На контрольном
+        //    кадре — свой CRC RAM (состояние после frame-1 кадра, т.е. ровно
+        //    frame исполненных кадров) и запоминаем его для сверки
         dout.write(localBits and 0xFF)
         dout.write((localBits shr 8) and 0xFF)
         if (isCheck) {
             val c = ramCrc()
+            localCrcs[frame] = c
+            localCrcs.keys.removeAll { it < frame - CHECK_EVERY }
             dout.write((c shr 24) and 0xFF)
             dout.write((c shr 16) and 0xFF)
             dout.write((c shr 8) and 0xFF)
@@ -136,33 +151,37 @@ class NetSession internal constructor(
         }
         dout.flush()
 
-        // 2. Ввод пира на текущий кадр (уже в буфере, если сеть успевает)
+        // 2. Если джиттер-буфер пересох (сеть отстаёт) — догоняем до текущего кадра
         while (head + buf.size <= frame) {
             buf.addLast(readShort())
+            consumePeerCrc(ramCrc)
         }
         val cur = buf.pollFirst() ?: throw EOFException("буфер ввода пуст")
         head++
 
-        // 3. Контроль рассинхрона: CRC пира лежит в потоке сразу после
-        //    его ввода этого же кадра (либо отложен при опережающем чтении)
-        if (isCheck) {
-            val peerCrc = if (pendingCrc.isNotEmpty() && pendingCrc.first().first == frame) {
-                pendingCrc.removeFirst().second
-            } else {
-                readInt()
-            }
-            if (peerCrc != ramCrc()) throw DesyncException(frame)
-        }
-
-        // 4. Добираем джиттер-буфер вперёд; CRC будущих кадров откладываем
+        // 3. Добираем джиттер-буфер вперёд (обычно ровно один шорт за кадр)
         while (buf.size < DELAY_FRAMES) {
-            val idx = head + buf.size
             buf.addLast(readShort())
-            if (idx % CHECK_EVERY == CHECK_EVERY - 1L) {
-                pendingCrc.addLast(idx to readInt())
-            }
+            consumePeerCrc(ramCrc)
         }
         return cur
+    }
+
+    /**
+     * Вызывается после каждого прочитанного из потока шорта пира. Если это был
+     * контрольный шорт пира (№k, k % CHECK_EVERY == 119) — следующие 4 байта
+     * потока это его CRC RAM (состояние пира после k кадров). Сверяем с СОБСТВЕННЫМ
+     * CRC того же кадра k: обычный путь читает шорт №k в кадре k — моменты
+     * совпадают; при догоне (пир отстал) — против сохранённого localCrcs[k].
+     */
+    private fun consumePeerCrc(ramCrc: () -> Int) {
+        val k = peerRead++
+        if (k % CHECK_EVERY == CHECK_EVERY - 1L) {
+            val peerCrc = readInt()
+            val mine = localCrcs.remove(k)
+                ?: throw IOException("Нет локального CRC для кадра $k")
+            if (peerCrc != mine) throw DesyncException(k)
+        }
     }
 
     // ------------------------------------------------------------------ //
@@ -219,7 +238,7 @@ class NetSession internal constructor(
 
     companion object {
         const val PORT = 45901
-        const val PROTOCOL = 1
+        const val PROTOCOL = 2
         private const val DELAY_FRAMES = 3      // задержка ввода/джиттер-буфер, кадров
         private const val CHECK_EVERY = 120L    // контроль RAM каждые ~2 секунды
 
