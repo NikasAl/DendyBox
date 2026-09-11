@@ -2,6 +2,7 @@ package com.dendybox.app.emulator
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
@@ -10,6 +11,7 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.util.Log
 import android.view.SurfaceHolder
 import android.widget.Toast
@@ -58,6 +60,14 @@ class EmulatorEngine(private val context: Context) {
     // выше — притормаживаем; внутри — такт по таймеру с дрейф-коррекцией
     @Volatile private var ringLow = 0
     @Volatile private var ringHigh = 0
+
+    // --- Производительность отрисовки/диагностика ---
+    // Липкий флаг: lockHardwareCanvas не сработал (не умеет/бросил) — откат
+    // на программный канвас до конца сессии, без попыток каждый кадр
+    @Volatile private var hwCanvasBroken = false
+    private var rendererLogged = false
+    private var perfAccumNs = 0L
+    private var perfFrames = 0
 
     private var fps = 60.0988
     @Volatile private var frameIndex = 0L
@@ -254,6 +264,9 @@ class EmulatorEngine(private val context: Context) {
     // ------------------------------------------------------------------ //
 
     private fun loop() {
+        // Чуть выше обычного: такт кадров важнее фоновой работы, но ниже
+        // приоритетов UI/рендер-потока системы
+        try { Process.setThreadPriority(Process.THREAD_PRIORITY_DISPLAY) } catch (_: Exception) {}
         val paint = Paint().apply { isFilterBitmap = true }
         val frameNs = (1e9 / fps).toLong()
         var nextNs = System.nanoTime()
@@ -273,6 +286,7 @@ class EmulatorEngine(private val context: Context) {
             }
 
             // --- ВВОД ---
+            val frameStartNs = System.nanoTime()
             val ns = netSession
             if (ns != null) {
                 // Lockstep: кадр N нельзя эмулировать, пока не пришёл ввод пира.
@@ -313,6 +327,19 @@ class EmulatorEngine(private val context: Context) {
             }
             frameIndex++
 
+            // Диагностика: средняя стоимость кадра (ввод+ядро+отрисовка, без
+            // такта). Если близко к бюджету 16,6 мс — устройство не тянет 60 fps
+            // (слышно как недогруз звука). В netplay сюда входит и ожидание
+            // пира — там показатель не о загруженности CPU
+            perfFrames++
+            perfAccumNs += System.nanoTime() - frameStartNs
+            if (perfFrames >= 300) {
+                Log.i("DendyBox", "perf: средний кадр %.1f мс из бюджета 16,6 мс"
+                    .format(perfAccumNs / perfFrames / 1e6))
+                perfFrames = 0
+                perfAccumNs = 0
+            }
+
             // --- ТАКТ КАДРОВ ---
             // Звук генерируется ядром покадрово и уходит в аудиопоток; уровень
             // кольца — точная мера расхождения наших часов и часов ЦАП.
@@ -350,8 +377,27 @@ class EmulatorEngine(private val context: Context) {
         return RectF(l, t, l + w, t + hh)
     }
 
+    /**
+     * Кадр на поверхность. Аппаратный канвас (API 26+) отдаёт масштабирование
+     * GPU: программный билинейный blit 256x240 -> во весь экран на бюджетных
+     * Cortex-A53 стоил дороже, чем работа самого ядра эмуляции (главная
+     * причина «тормозов» на слабых телефонах). Если устройство не умеет —
+     * липкий откат на программный канвас.
+     */
     private fun drawFrame(h: SurfaceHolder, bmp: Bitmap, paint: Paint) {
-        val c = h.lockCanvas() ?: return
+        val c: Canvas = if (hwCanvasBroken) {
+            h.lockCanvas() ?: return
+        } else {
+            val hw = try { h.lockHardwareCanvas() } catch (_: Exception) { null }
+            if (hw != null) hw else {
+                hwCanvasBroken = true
+                h.lockCanvas() ?: return
+            }
+        }
+        if (!rendererLogged) {
+            rendererLogged = true
+            Log.i("DendyBox", "render: ${if (hwCanvasBroken) "CPU-канвас (GPU недоступен)" else "GPU-канвас"}")
+        }
         try {
             c.drawColor(Color.BLACK)
             val r = frameRect(c.width, c.height)
@@ -405,6 +451,9 @@ class EmulatorEngine(private val context: Context) {
      * когда AudioTrack при недогрузке многократно проигрывает остаток буфера).
      */
     private fun audioLoop() {
+        // Аудиопоток чувствительнее всех к задержкам: недогруз дорожки слышен
+        // как щелчки. Даём ему максимальный приоритет в приложении
+        try { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO) } catch (_: Exception) {}
         val sr = audioTrack?.sampleRate ?: 48000
         val silence = ShortArray(sr / 200 * 2) // ~5 мс тишины
         val ab = audioBuf

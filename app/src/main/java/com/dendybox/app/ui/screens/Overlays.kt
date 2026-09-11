@@ -4,7 +4,9 @@ import android.graphics.BitmapFactory
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -12,11 +14,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -48,8 +52,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -63,9 +71,40 @@ import java.util.Locale
 private val dateFmt = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
 
 @Composable
-private fun MenuButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun MenuButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null
+) {
     FilledTonalButton(onClick = onClick, modifier = modifier.fillMaxWidth()) {
+        if (icon != null) {
+            Icon(icon, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+        }
         Text(text)
+    }
+}
+
+/**
+ * Тонкий индикатор прокрутки у правого края: Compose сам по себе скроллбар
+ * не рисует, из-за чего длинные списки выглядят статичными.
+ */
+@Composable
+private fun ScrollHint(scroll: ScrollState, modifier: Modifier = Modifier) {
+    if (scroll.maxValue <= 0) return
+    val trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.18f)
+    val thumbColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+    Canvas(modifier) {
+        val thumbH = size.height * 0.35f
+        val y = (scroll.value.toFloat() / scroll.maxValue) * (size.height - thumbH)
+        drawRoundRect(trackColor, cornerRadius = CornerRadius(size.width / 2f))
+        drawRoundRect(
+            thumbColor,
+            topLeft = Offset(0f, y),
+            size = Size(size.width, thumbH),
+            cornerRadius = CornerRadius(size.width / 2f)
+        )
     }
 }
 
@@ -100,32 +139,45 @@ fun PauseOverlay(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             shape = RoundedCornerShape(20.dp)
         ) {
+            val scroll = rememberScrollState()
             // Скролл обязателен: в ландшафте высота экрана мала, пунктов меню
-            // много — без него нижние кнопки (сеть, выход) уходят за край
-            Column(
-                Modifier
-                    .width(300.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text("Пауза", style = MaterialTheme.typography.headlineSmall)
-                MenuButton("Продолжить", onResume)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MenuButton("Квик-сейв", guarded(onQuickSave), Modifier.weight(1f))
-                    MenuButton("Квик-лоад", guarded(onQuickLoad), Modifier.weight(1f))
+            // много. Сетевая игра поднята в начало списка (важная фича — видна
+            // без прокрутки), справа — индикатор прокрутки
+            Box(Modifier.width(300.dp)) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(scroll)
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Пауза", style = MaterialTheme.typography.headlineSmall)
+                    MenuButton("Продолжить", onResume)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        MenuButton("Квик-сейв", guarded(onQuickSave), Modifier.weight(1f))
+                        MenuButton("Квик-лоад", guarded(onQuickLoad), Modifier.weight(1f))
+                    }
+                    MenuButton(
+                        if (netLocked) "Отключить сетевую игру" else "Игра по сети (2 игрока)",
+                        onNet,
+                        icon = Icons.Filled.VideogameAsset
+                    )
+                    MenuButton("Слоты сохранений", guarded(onSlots))
+                    MenuButton("Читы", guarded(onCheats))
+                    MenuButton("Настройки управления", onEdit)
+                    MenuButton("Настройки", onSettings)
+                    OutlinedButton(onClick = onExit, modifier = Modifier.fillMaxWidth()) {
+                        Text("Выход из игры")
+                    }
                 }
-                MenuButton("Слоты сохранений", guarded(onSlots))
-                MenuButton("Читы", guarded(onCheats))
-                MenuButton("Настройки управления", onEdit)
-                MenuButton("Настройки", onSettings)
-                MenuButton(
-                    if (netLocked) "Отключить сетевую игру" else "Игра по сети (2 игрока)",
-                    onNet
+                ScrollHint(
+                    scroll,
+                    Modifier
+                        .align(Alignment.CenterEnd)
+                        .fillMaxHeight()
+                        .padding(vertical = 22.dp)
+                        .width(4.dp)
                 )
-                OutlinedButton(onClick = onExit, modifier = Modifier.fillMaxWidth()) {
-                    Text("Выход из игры")
-                }
             }
         }
     }
@@ -253,70 +305,108 @@ private fun SlotRow(
 
 @Composable
 fun SettingsPanel(onBack: () -> Unit, onSoundChange: (Boolean) -> Unit) {
-    Column(
+    val scroll = rememberScrollState()
+    Box(
         Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .verticalScroll(rememberScrollState())
-            .padding(12.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }
-            Text("Настройки", style = MaterialTheme.typography.titleLarge)
+        // Умеренная ширина и центрирование: в ландшафте контент не растягивается
+        // на весь экран, каждая настройка — строка «подпись слева, ползунок справа»
+        Column(
+            Modifier
+                .verticalScroll(scroll)
+                .widthIn(max = 560.dp)
+                .padding(horizontal = 20.dp, vertical = 8.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }
+                Text("Настройки", style = MaterialTheme.typography.titleLarge)
+            }
+
+            val turboA by SettingsStore.turboHzA.collectAsState()
+            val turboB by SettingsStore.turboHzB.collectAsState()
+            val sound by SettingsStore.sound.collectAsState()
+            val haptics by SettingsStore.haptics.collectAsState()
+            val dpadSize by SettingsStore.dpadSize.collectAsState()
+            val opacity by SettingsStore.controlsOpacity.collectAsState()
+            val twoLocal by SettingsStore.twoLocal.collectAsState()
+
+            SettingSlider(
+                "Турбо-кнопка A′",
+                "Частота автоповтора: %d Гц".format(turboA.toInt()),
+                turboA, 5f, 30f
+            ) { SettingsStore.setTurboHzA(it) }
+            SettingSlider(
+                "Турбо-кнопка B′",
+                "Частота автоповтора: %d Гц".format(turboB.toInt()),
+                turboB, 5f, 30f
+            ) { SettingsStore.setTurboHzB(it) }
+            SettingSlider(
+                "Размер крестовины",
+                "Текущий: %d dp".format(dpadSize.toInt()),
+                dpadSize, 44f, 80f
+            ) { SettingsStore.setDpadSize(it) }
+            SettingSlider(
+                "Прозрачность кнопок",
+                "Текущая: %d%%".format((opacity * 100).toInt()),
+                opacity, 0.2f, 0.9f
+            ) { SettingsStore.setControlsOpacity(it) }
+
+            SettingSwitch("Звук", sound) { SettingsStore.setSound(it); onSoundChange(it) }
+            SettingSwitch("Вибро-отклик крестовины", haptics) { SettingsStore.setHaptics(it) }
+            SettingSwitch(
+                "2 игрока на одном экране",
+                twoLocal
+            ) { SettingsStore.setTwoLocal(it) }
+            Text(
+                "Режим «2 игрока»: на экране появляется второй джойстик (P2 справа). " +
+                    "Позиции подстроятся один раз автоматически, дальше их можно " +
+                    "поменять в редакторе управления. Для игры по сети этот режим не нужен.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
-
-        val turboA by SettingsStore.turboHzA.collectAsState()
-        val turboB by SettingsStore.turboHzB.collectAsState()
-        val sound by SettingsStore.sound.collectAsState()
-        val haptics by SettingsStore.haptics.collectAsState()
-        val dpadSize by SettingsStore.dpadSize.collectAsState()
-        val opacity by SettingsStore.controlsOpacity.collectAsState()
-        val twoLocal by SettingsStore.twoLocal.collectAsState()
-
-        SettingSlider(
-            "Турбо-кнопка A′ — частота автоповтора: %d Гц".format(turboA.toInt()),
-            turboA, 5f, 30f
-        ) { SettingsStore.setTurboHzA(it) }
-        SettingSlider(
-            "Турбо-кнопка B′ — частота автоповтора: %d Гц".format(turboB.toInt()),
-            turboB, 5f, 30f
-        ) { SettingsStore.setTurboHzB(it) }
-        SettingSlider(
-            "Размер крестовины: %d dp".format(dpadSize.toInt()),
-            dpadSize, 44f, 80f
-        ) { SettingsStore.setDpadSize(it) }
-        SettingSlider(
-            "Прозрачность кнопок: %d%%".format((opacity * 100).toInt()),
-            opacity, 0.2f, 0.9f
-        ) { SettingsStore.setControlsOpacity(it) }
-
-        SettingSwitch("Звук", sound) { SettingsStore.setSound(it); onSoundChange(it) }
-        SettingSwitch("Вибро-отклик крестовины", haptics) { SettingsStore.setHaptics(it) }
-        SettingSwitch(
-            "2 игрока на одном экране",
-            twoLocal
-        ) { SettingsStore.setTwoLocal(it) }
-        Text(
-            "Режим «2 игрока»: на экране появляется второй джойстик (P2 справа). " +
-                "Позиции подстроятся один раз автоматически, дальше их можно " +
-                "поменять в редакторе управления. Для игры по сети этот режим не нужен.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+        ScrollHint(
+            scroll,
+            Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .padding(vertical = 24.dp)
+                .width(4.dp)
         )
     }
 }
 
 @Composable
 private fun SettingSlider(
-    label: String,
+    title: String,
+    subtitle: String,
     value: Float,
     from: Float,
     to: Float,
     onChange: (Float) -> Unit
 ) {
-    Column(Modifier.padding(vertical = 6.dp)) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-        Slider(value = value, valueRange = from..to, onValueChange = onChange)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Slider(
+            value = value,
+            valueRange = from..to,
+            onValueChange = onChange,
+            modifier = Modifier.width(180.dp)
+        )
     }
 }
 
