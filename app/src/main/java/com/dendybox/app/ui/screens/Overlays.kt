@@ -30,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.VideogameAsset
 import androidx.compose.material3.Button
@@ -117,6 +118,7 @@ fun PauseOverlay(
     onResume: () -> Unit,
     onQuickSave: () -> Unit,
     onQuickLoad: () -> Unit,
+    onReset: () -> Unit,
     onSlots: () -> Unit,
     onCheats: () -> Unit,
     onEdit: () -> Unit,
@@ -126,7 +128,8 @@ fun PauseOverlay(
     netLocked: Boolean = false,
     onNetBlocked: () -> Unit = {}
 ) {
-    // В сетевой игре сейвы и читы разрушили бы синхронизацию — недоступны
+    // В сетевой игре сейвы, читы и сброс разрушили бы синхронизацию —
+    // всё это недоступно
     fun guarded(action: () -> Unit): () -> Unit =
         if (netLocked) onNetBlocked else action
     Box(
@@ -161,6 +164,11 @@ fun PauseOverlay(
                         if (netLocked) "Отключить сетевую игру" else "Игра по сети (2 игрока)",
                         onNet,
                         icon = Icons.Filled.VideogameAsset
+                    )
+                    MenuButton(
+                        "Сброс картриджа (начать заново)",
+                        guarded(onReset),
+                        icon = Icons.Filled.Refresh
                     )
                     MenuButton("Слоты сохранений", guarded(onSlots))
                     MenuButton("Читы", guarded(onCheats))
@@ -311,10 +319,12 @@ fun SettingsPanel(onBack: () -> Unit, onSoundChange: (Boolean) -> Unit) {
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Умеренная ширина и центрирование: в ландшафте контент не растягивается
-        // на весь экран, каждая настройка — строка «подпись слева, ползунок справа»
+        // Умеренная ширина, по центру экрана: в ландшафте контент не растягивается
+        // на весь экран и справа не остаётся пустоты; каждая настройка — строка
+        // «подпись и текущее значение слева, ползунок справа»
         Column(
             Modifier
+                .align(Alignment.TopCenter)
                 .verticalScroll(scroll)
                 .widthIn(max = 560.dp)
                 .padding(horizontal = 20.dp, vertical = 8.dp)
@@ -333,30 +343,39 @@ fun SettingsPanel(onBack: () -> Unit, onSoundChange: (Boolean) -> Unit) {
             val twoLocal by SettingsStore.twoLocal.collectAsState()
 
             SettingSlider(
-                "Турбо-кнопка A′",
-                "Частота автоповтора: %d Гц".format(turboA.toInt()),
+                "Частота турбо-кнопки A′",
+                "Автоповтор при удержании: %d нажатий/с".format(turboA.toInt()),
                 turboA, 5f, 30f
             ) { SettingsStore.setTurboHzA(it) }
             SettingSlider(
-                "Турбо-кнопка B′",
-                "Частота автоповтора: %d Гц".format(turboB.toInt()),
+                "Частота турбо-кнопки B′",
+                "Автоповтор при удержании: %d нажатий/с".format(turboB.toInt()),
                 turboB, 5f, 30f
             ) { SettingsStore.setTurboHzB(it) }
             SettingSlider(
                 "Размер крестовины",
-                "Текущий: %d dp".format(dpadSize.toInt()),
+                "Текущий размер: %d dp".format(dpadSize.toInt()),
                 dpadSize, 44f, 80f
             ) { SettingsStore.setDpadSize(it) }
             SettingSlider(
-                "Прозрачность кнопок",
-                "Текущая: %d%%".format((opacity * 100).toInt()),
+                "Видимость кнопок",
+                "Сейчас: %d%% (меньше — прозрачнее)".format((opacity * 100).toInt()),
                 opacity, 0.2f, 0.9f
             ) { SettingsStore.setControlsOpacity(it) }
 
-            SettingSwitch("Звук", sound) { SettingsStore.setSound(it); onSoundChange(it) }
-            SettingSwitch("Вибро-отклик крестовины", haptics) { SettingsStore.setHaptics(it) }
+            SettingSwitch(
+                "Звук",
+                "Звук игры; быстро выключить можно иконкой динамика у кнопки паузы",
+                sound
+            ) { SettingsStore.setSound(it); onSoundChange(it) }
+            SettingSwitch(
+                "Вибро-отклик крестовины",
+                "Короткая вибрация при нажатии направлений",
+                haptics
+            ) { SettingsStore.setHaptics(it) }
             SettingSwitch(
                 "2 игрока на одном экране",
+                "Второй джойстик (P2) на этом же телефоне, рядом с первым",
                 twoLocal
             ) { SettingsStore.setTwoLocal(it) }
             Text(
@@ -411,14 +430,26 @@ private fun SettingSlider(
 }
 
 @Composable
-private fun SettingSwitch(label: String, value: Boolean, onChange: (Boolean) -> Unit) {
+private fun SettingSwitch(
+    title: String,
+    subtitle: String,
+    value: Boolean,
+    onChange: (Boolean) -> Unit
+) {
     Row(
         Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         Switch(checked = value, onCheckedChange = onChange)
     }
 }

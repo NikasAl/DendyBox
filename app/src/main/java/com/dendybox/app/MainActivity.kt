@@ -56,7 +56,20 @@ class MainActivity : ComponentActivity() {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
         hideSystemBars()
-        setContent { DendyBoxTheme { AppRoot() } }
+        setContent {
+            DendyBoxTheme {
+                // Корневой Surface задаёт LocalContentColor всему приложению.
+                // Без него тексты без явного цвета получают дефолтный ЧЁРНЫЙ
+                // и на тёмном фоне становятся невидимыми (подписи ползунков
+                // и переключателей в настройках, заголовки экранов).
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    AppRoot()
+                }
+            }
+        }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

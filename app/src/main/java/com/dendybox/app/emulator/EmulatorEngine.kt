@@ -229,6 +229,22 @@ class EmulatorEngine(private val context: Context) {
         main.post { onDone(ok) }
     }
 
+    /**
+     * Сброс картриджа (кнопка RESET): ядро перезапускает игру с нуля.
+     * Выполняется в потоке эмуляции, когда кадры не идут. Автосейв сразу
+     * перезаписывается стартовым состоянием — иначе после перезапуска
+     * приложения игра «продолжилась бы с автосохранения» до-сбросовым
+     * прогрессом, и сброс выглядел бы не сработавшим.
+     */
+    fun resetGame(onDone: (Boolean) -> Unit) = runOnLoop {
+        val ok = Native.reset()
+        if (ok) {
+            Native.clearAudio() // в кольце могло остаться устаревшее звучание
+            saveInternal(SaveManager.AUTO)
+        }
+        main.post { onDone(ok) }
+    }
+
     /** Применить активные читы: RAM-патчи + коды Game Genie. */
     fun applyCheats(ramPacked: IntArray, ggCodes: List<String>) {
         Native.setCheats(ramPacked)

@@ -21,6 +21,8 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
@@ -74,6 +76,9 @@ fun GameScreen(
 
     // Локальный режим «2 игрока» — второй джойстик на том же экране
     val twoLocal by SettingsStore.twoLocal.collectAsState()
+    // Реактивное состояние звука для кнопки Mute (иконка меняется на ходу,
+    // в т.ч. если звук выключили через «Настройки»)
+    val soundOn by SettingsStore.sound.collectAsState()
     LaunchedEffect(twoLocal) {
         // при первом включении — один раз расставить P1 слева / P2 справа
         if (twoLocal) layoutStore.applyTwoPresetOnce()
@@ -105,7 +110,7 @@ fun GameScreen(
             val netLocked = engine.isNetActive()
             // В сетевой игре весь локальный ввод идёт в порт своей стороны
             val myPort = if (netLocked) engine.netLocalPort() else 0
-            // Верхняя панель: пауза слева, квик-сейв/лоад справа
+            // Верхняя панель: слева пауза и Mute, справа квик-сейв/лоад и настройки управления
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -113,7 +118,20 @@ fun GameScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircleIcon(Icons.Filled.Pause, "Пауза") { onScreen(Screen.PAUSE) }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircleIcon(Icons.Filled.Pause, "Пауза") { onScreen(Screen.PAUSE) }
+                    CircleIcon(
+                        if (soundOn) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
+                        if (soundOn) "Выключить звук" else "Включить звук"
+                    ) {
+                        val v = !soundOn
+                        SettingsStore.setSound(v)
+                        onSoundChange(v)
+                    }
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     CircleIcon(Icons.Filled.Tune, "Настройки управления") { onScreen(Screen.EDIT) }
                     CircleIcon(Icons.Filled.Save, "Квик-сейв") {
@@ -229,6 +247,12 @@ fun GameScreen(
                     }
                     onScreen(Screen.GAME)
                 },
+                onReset = {
+                    engine.resetGame { ok ->
+                        toast(if (ok) "Игра начата заново" else "Сброс не удался")
+                    }
+                    onScreen(Screen.GAME)
+                },
                 onSlots = { onScreen(Screen.SLOTS) },
                 onCheats = { onScreen(Screen.CHEATS) },
                 onEdit = { onScreen(Screen.EDIT) },
@@ -249,7 +273,7 @@ fun GameScreen(
                 },
                 onExit = onExit,
                 netLocked = engine.isNetActive(),
-                onNetBlocked = { toast("В сетевой игре сейвы и читы недоступны") }
+                onNetBlocked = { toast("В сетевой игре это недоступно") }
             )
 
             Screen.NET -> NetPanel(

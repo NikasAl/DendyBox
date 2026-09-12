@@ -334,6 +334,15 @@ Java_com_dendybox_app_Native_runFrame(JNIEnv* /*env*/, jobject /*thiz*/) {
     return JNI_TRUE;
 }
 
+// Кнопка RESET консоли: ядро перезапускает игру с нуля (retro_reset).
+// Вызывается только из потока эмуляции, когда кадры не идут (пауза).
+JNIEXPORT jboolean JNICALL
+Java_com_dendybox_app_Native_reset(JNIEnv* /*env*/, jobject /*thiz*/) {
+    if (!g_loaded) return JNI_FALSE;
+    f_reset();
+    return JNI_TRUE;
+}
+
 JNIEXPORT void JNICALL
 Java_com_dendybox_app_Native_setInput(JNIEnv* /*env*/, jobject /*thiz*/,
                                       jint p1, jint p2) {

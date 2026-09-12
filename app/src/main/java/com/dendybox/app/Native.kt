@@ -21,6 +21,9 @@ object Native {
     /** Эмулировать один кадр (читы применяются перед кадром). */
     external fun runFrame(): Boolean
 
+    /** Сброс игры (retro_reset) — как кнопка RESET на консоли. Только из потока эмуляции. */
+    external fun reset(): Boolean
+
     /** Битовые маски кнопок (libretro: B=1<<0, A=1<<8, см. InputState). */
     external fun setInput(p1: Int, p2: Int)
 
