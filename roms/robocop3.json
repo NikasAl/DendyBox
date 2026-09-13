@@ -1,0 +1,7 @@
+{
+  "damage": {
+    "addr": "0x063E",
+    "mode": "dec",
+    "value": 0
+  }
+}
