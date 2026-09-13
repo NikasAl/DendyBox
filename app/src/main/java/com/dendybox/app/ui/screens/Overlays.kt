@@ -312,7 +312,11 @@ private fun SlotRow(
 // ---------------------------------------------------------------------------
 
 @Composable
-fun SettingsPanel(onBack: () -> Unit, onSoundChange: (Boolean) -> Unit) {
+fun SettingsPanel(
+    onBack: () -> Unit,
+    onSoundChange: (Boolean) -> Unit,
+    hasDamageWatch: Boolean = false
+) {
     val scroll = rememberScrollState()
     Box(
         Modifier
@@ -368,11 +372,21 @@ fun SettingsPanel(onBack: () -> Unit, onSoundChange: (Boolean) -> Unit) {
                 "Звук игры; быстро выключить можно иконкой динамика у кнопки паузы",
                 sound
             ) { SettingsStore.setSound(it); onSoundChange(it) }
-            SettingSwitch(
-                "Вибро-отклик крестовины",
-                "Короткая вибрация при нажатии направлений",
-                haptics
-            ) { SettingsStore.setHaptics(it) }
+            if (hasDamageWatch) {
+                // Игра задаёт байт урона (roms/<flavor>.json): переключатель
+                // управляет и нажатиями, и вибрацией при получении урона
+                SettingSwitch(
+                    "Вибро-отклик",
+                    "При нажатиях и при получении урона в этой игре",
+                    haptics
+                ) { SettingsStore.setHaptics(it) }
+            } else {
+                SettingSwitch(
+                    "Вибро-отклик крестовины",
+                    "Короткая вибрация при нажатии направлений",
+                    haptics
+                ) { SettingsStore.setHaptics(it) }
+            }
             SettingSwitch(
                 "2 игрока на одном экране",
                 "Второй джойстик (P2) на этом же телефоне, рядом с первым",

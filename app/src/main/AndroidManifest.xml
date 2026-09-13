@@ -4,6 +4,10 @@
     <!-- Понадобится на этапе netplay (этап 5). Пока не используется. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Вибро-отклик: нажатия крестовины (Vibrator) и урон в игре
+         (байт RAM из конфига игры, roms/<flavor>.json) -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"

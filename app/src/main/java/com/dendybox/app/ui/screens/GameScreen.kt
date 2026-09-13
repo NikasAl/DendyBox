@@ -60,6 +60,7 @@ fun GameScreen(
     screen: Screen,
     onScreen: (Screen) -> Unit,
     cheatsRepo: CheatRepository?,
+    hasDamageWatch: Boolean = false,
     onSoundChange: (Boolean) -> Unit,
     onExit: () -> Unit,
     onSurfaceCreated: (SurfaceHolder) -> Unit,
@@ -316,7 +317,8 @@ fun GameScreen(
 
             Screen.SETTINGS -> SettingsPanel(
                 onBack = { onScreen(Screen.PAUSE) },
-                onSoundChange = onSoundChange
+                onSoundChange = onSoundChange,
+                hasDamageWatch = hasDamageWatch
             )
 
             else -> {}

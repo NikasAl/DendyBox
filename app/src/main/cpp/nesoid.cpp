@@ -86,6 +86,42 @@ static std::mutex g_cheats_mtx;
 static uint8_t* g_ram = nullptr;
 static size_t g_ram_size = 0;
 
+// Вибро-отклик урона: наблюдение за одним байтом RAM (адрес из конфига игры).
+// Сравнение «до/после кадра» стоит наносекунды; срабатывания накапливаются
+// в атомике, Kotlin опрашивает его раз в кадр только когда включена настройка.
+static std::atomic<bool> g_watch_on{false};   // проверка включена (конфиг + настройка)
+static std::atomic<bool> g_watch_hit{false};  // было срабатывание с прошлого опроса
+static std::atomic<int> g_watch_addr{-1};     // адрес в g_ram либо -1 (не задан/не поддержан)
+static std::atomic<int> g_watch_mode{0};      // 0=change, 1=dec (урон), 2=inc, 3=eq (метка)
+static std::atomic<int> g_watch_value{0};     // эталон для режима eq
+static uint8_t g_watch_prev = 0;              // значение байта на прошлом кадре (поток эмуляции)
+
+// Обновить эталон «предыдущего значения» (после reset/loadState — чтобы
+// скачок RAM от восстановления состояния не считался уроном).
+static void watch_snapshot_prev() {
+    const int a = g_watch_addr.load(std::memory_order_relaxed);
+    if (a >= 0 && g_ram != nullptr && static_cast<size_t>(a) < g_ram_size)
+        g_watch_prev = g_ram[a];
+}
+
+// Вызывается после retro_run в потоке эмуляции
+static void watch_check_frame() {
+    if (!g_watch_on.load(std::memory_order_relaxed) || g_ram == nullptr) return;
+    const int a = g_watch_addr.load(std::memory_order_relaxed);
+    if (a < 0 || static_cast<size_t>(a) >= g_ram_size) return;
+    const uint8_t nv = g_ram[a];
+    const uint8_t pv = g_watch_prev;
+    g_watch_prev = nv;
+    bool hit;
+    switch (g_watch_mode.load(std::memory_order_relaxed)) {
+        case 1:  hit = nv < pv; break;                                    // значение упало (урон)
+        case 2:  hit = nv > pv; break;                                    // выросло
+        case 3:  hit = (nv == g_watch_value) && (pv != g_watch_value); break; // метка урона
+        default: hit = nv != pv; break;                                   // любое изменение
+    }
+    if (hit) g_watch_hit.store(true, std::memory_order_relaxed);
+}
+
 // ---------------------------------------------------------------------------
 // Колбэки для ядра
 // ---------------------------------------------------------------------------
@@ -331,7 +367,39 @@ Java_com_dendybox_app_Native_runFrame(JNIEnv* /*env*/, jobject /*thiz*/) {
     if (!g_loaded) return JNI_FALSE;
     apply_cheats();
     f_run();
+    watch_check_frame();
     return JNI_TRUE;
+}
+
+// Задать байт наблюдения (вибро-отклик урона): адрес CPU-пространства NES.
+// $0000–$1FFF — зеркала базовой RAM, сводим к $0000–$07FF; адреса WRAM
+// ($6000+) не поддержаны (вибрация просто не включится).
+JNIEXPORT void JNICALL
+Java_com_dendybox_app_Native_setDamageWatch(JNIEnv* /*env*/, jobject /*thiz*/,
+                                            jint addr, jint mode, jint value) {
+    int a = addr;
+    if (a >= 0 && a < 0x2000) a &= 0x7FF;
+    if (a >= 0 && g_ram != nullptr && static_cast<size_t>(a) < g_ram_size) {
+        g_watch_addr.store(a, std::memory_order_relaxed);
+        g_watch_mode.store(mode, std::memory_order_relaxed);
+        g_watch_value.store(value, std::memory_order_relaxed);
+        g_watch_prev = g_ram[a];
+    } else {
+        g_watch_addr.store(-1, std::memory_order_relaxed);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_dendybox_app_Native_setDamageWatchEnabled(JNIEnv* /*env*/, jobject /*thiz*/,
+                                                   jboolean on) {
+    g_watch_on.store(on == JNI_TRUE, std::memory_order_relaxed);
+    if (!on) g_watch_hit.store(false, std::memory_order_relaxed);
+}
+
+// true — с прошлого вызова байт наблюдения изменился по заданному правилу
+JNIEXPORT jboolean JNICALL
+Java_com_dendybox_app_Native_consumeDamageHit(JNIEnv* /*env*/, jobject /*thiz*/) {
+    return g_watch_hit.exchange(false, std::memory_order_relaxed) ? JNI_TRUE : JNI_FALSE;
 }
 
 // Кнопка RESET консоли: ядро перезапускает игру с нуля (retro_reset).
@@ -340,6 +408,8 @@ JNIEXPORT jboolean JNICALL
 Java_com_dendybox_app_Native_reset(JNIEnv* /*env*/, jobject /*thiz*/) {
     if (!g_loaded) return JNI_FALSE;
     f_reset();
+    // RAM после сброса — не урон: обновляем эталон наблюдаемого байта
+    watch_snapshot_prev();
     return JNI_TRUE;
 }
 
@@ -437,7 +507,11 @@ Java_com_dendybox_app_Native_loadState(JNIEnv* env, jobject /*thiz*/, jobject bu
     auto* p = static_cast<const void*>(env->GetDirectBufferAddress(buf));
     const jlong cap = env->GetDirectBufferCapacity(buf);
     if (p == nullptr || cap <= 0) return JNI_FALSE;
-    return f_unserialize(p, static_cast<size_t>(cap)) ? JNI_TRUE : JNI_FALSE;
+    const jboolean ok = f_unserialize(p, static_cast<size_t>(cap)) ? JNI_TRUE : JNI_FALSE;
+    // Восстановление состояния скачком меняет RAM — это не урон:
+    // обновляем эталон наблюдаемого байта
+    if (ok) watch_snapshot_prev();
+    return ok;
 }
 
 JNIEXPORT void JNICALL

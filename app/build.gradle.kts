@@ -251,15 +251,20 @@ android {
 
 // ================= Копирование выбранного ROM в assets варианта =================
 // «Одна игра — один картридж»: в каждый APK попадает ровно один ROM (rom.nes).
+// Опционально копируется и конфиг игры roms/<flavor>.json → assets/game.json
+// (сейчас — байт урона для вибро-отклика; см. roms/README.md).
 gameSpecs.forEach { spec ->
     val cap = spec.flavor.replaceFirstChar { it.uppercaseChar() }
     val outDir = layout.buildDirectory.dir("generated/rom/${spec.flavor}")
+    val cfgSrc = romsDir.resolve("${spec.flavor}.json")
     tasks.register("prepare${cap}Rom") {
         group = "dendybox"
         description = "Копирует roms/${spec.fileName} в assets варианта ${spec.flavor} (как rom.nes)"
         val src = spec.file
         if (src != null) inputs.file(src)
+        if (cfgSrc.exists()) inputs.file(cfgSrc)
         outputs.file(outDir.map { it.file("rom.nes") })
+        if (cfgSrc.exists()) outputs.file(outDir.map { it.file("game.json") })
         doLast {
             if (src == null || !src.exists()) {
                 throw GradleException(
@@ -274,6 +279,16 @@ gameSpecs.forEach { spec ->
                 from(src)
                 rename { "rom.nes" }
                 into(dir)
+            }
+            if (cfgSrc.exists()) {
+                copy {
+                    from(cfgSrc)
+                    rename { "game.json" }
+                    into(dir)
+                }
+            } else {
+                // конфиг могли убрать — не оставляем устаревший в сборке
+                dir.resolve("game.json").delete()
             }
         }
     }

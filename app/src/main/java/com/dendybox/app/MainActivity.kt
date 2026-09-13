@@ -36,6 +36,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.dendybox.app.cheats.CheatRepository
 import com.dendybox.app.emulator.EmulatorEngine
 import com.dendybox.app.input.InputState
+import com.dendybox.app.settings.GameConfig
 import com.dendybox.app.settings.SettingsStore
 import com.dendybox.app.ui.DendyBoxTheme
 import com.dendybox.app.ui.screens.GameScreen
@@ -90,6 +91,10 @@ class MainActivity : ComponentActivity() {
 private fun AppRoot() {
     val context = LocalContext.current
     SettingsStore.init(context)
+    // Конфиг игры (roms/<flavor>.json → assets/game.json): байт урона для
+    // вибро-отклика. Файл опционален; читается один раз, до старта движка
+    remember { GameConfig.load(context) }
+    val hasDamageWatch = GameConfig.damageWatch != null
 
     val engine = remember { EmulatorEngine(context) }
     var started by remember { mutableStateOf(false) }
@@ -137,6 +142,9 @@ private fun AppRoot() {
         InputState.turboHzB = SettingsStore.turboHzB.value
         launch { SettingsStore.turboHzA.collect { InputState.turboHzA = it } }
         launch { SettingsStore.turboHzB.collect { InputState.turboHzB = it } }
+        // «Вибро-отклик» управляет и нажатиями, и вибрацией урона (если игра
+        // задаёт байт урона в конфиге). collect выдаёт текущее значение сразу
+        launch { SettingsStore.haptics.collect { engine.setDamageWatchEnabled(it) } }
     }
 
     // Пауза на экранах меню (при уходе в паузу пишется автосейв)
@@ -175,6 +183,7 @@ private fun AppRoot() {
         screen = screen,
         onScreen = { screen = it },
         cheatsRepo = cheatsRepo,
+        hasDamageWatch = hasDamageWatch,
         onSoundChange = { engine.setSound(it) },
         onExit = {
             engine.stop()

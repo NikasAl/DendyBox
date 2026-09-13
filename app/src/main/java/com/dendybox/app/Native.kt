@@ -24,6 +24,22 @@ object Native {
     /** Сброс игры (retro_reset) — как кнопка RESET на консоли. Только из потока эмуляции. */
     external fun reset(): Boolean
 
+    // --- Вибро-отклик урона: наблюдение за байтом RAM (конфиг игры) ---
+
+    /**
+     * Задать байт наблюдения: [addr] в CPU-пространстве NES ($0000–$1FFF,
+     * зеркала сводятся к базовой RAM $0000–$07FF); [mode]: 0=change, 1=dec
+     * (урон), 2=inc, 3=eq — срабатывание при равенстве [value].
+     * Вызывать после загрузки ROM.
+     */
+    external fun setDamageWatch(addr: Int, mode: Int, value: Int)
+
+    /** Включить/выключить проверку (переключатель «Вибро-отклик»). */
+    external fun setDamageWatchEnabled(on: Boolean)
+
+    /** true — с прошлого вызова байт изменился по заданному правилу (опрос раз в кадр). */
+    external fun consumeDamageHit(): Boolean
+
     /** Битовые маски кнопок (libretro: B=1<<0, A=1<<8, см. InputState). */
     external fun setInput(p1: Int, p2: Int)
 

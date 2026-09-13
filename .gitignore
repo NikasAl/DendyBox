@@ -7,10 +7,12 @@ app/build/
 app/.cxx/
 # Ядро эмулятора скачивается скриптом scripts/build_core_fceumm.sh
 app/src/main/jniLibs/**/*.so
-# ROM'ы не хранятся в публичном репозитории (только README и games.json)
+# ROM'ы не хранятся в публичном репозитории (только README, games.json
+# и конфиги игр *.json — они не содержат данных ROM)
 roms/*
 !roms/README.md
 !roms/games.json
+!roms/*.json
 # Релизный keystore и пароли подписи — только локально (см. scripts/make_keystore.sh)
 keystore/
 # Скриншоты для магазина — артефакты локальных съёмок (только корневая папка)

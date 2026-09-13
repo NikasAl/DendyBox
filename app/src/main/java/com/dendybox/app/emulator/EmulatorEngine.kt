@@ -9,9 +9,14 @@ import android.graphics.RectF
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import android.view.SurfaceHolder
 import android.widget.Toast
@@ -19,6 +24,7 @@ import com.dendybox.app.Native
 import com.dendybox.app.input.InputState
 import com.dendybox.app.net.NetSession
 import com.dendybox.app.saves.SaveManager
+import com.dendybox.app.settings.GameConfig
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
@@ -171,6 +177,12 @@ class EmulatorEngine(private val context: Context) {
         frameW = dims[0]
         frameH = dims[1]
 
+        // Байт урона из конфига игры (roms/<flavor>.json → assets/game.json):
+        // задаётся до старта цикла, дальше сравнение идёт внутри runFrame
+        GameConfig.damageWatch?.let { dw ->
+            Native.setDamageWatch(dw.addr, dw.mode, dw.value)
+        }
+
         val fb = ByteBuffer.allocateDirect(frameW * frameH * 2)
             .order(ByteOrder.LITTLE_ENDIAN)
         frameBuffer = fb
@@ -257,6 +269,42 @@ class EmulatorEngine(private val context: Context) {
         main.post { audioTrack?.setVolume(if (on) 1f else 0f) }
     }
 
+    // --- Вибро-отклик урона (конфиг игры GameConfig.damageWatch) ---
+    private val vibrator: Vibrator? = try {
+        if (Build.VERSION.SDK_INT >= 31) {
+            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager)
+                .defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+    } catch (_: Exception) {
+        null
+    }
+    @Volatile private var damageVibeOn = false
+    private var lastDamageVibeMs = 0L
+
+    /**
+     * Включить/выключить вибрацию при уроне. Зовётся из главного потока
+     * при старте и при смене настройки «Вибро-отклик». Если конфиг игры
+     * не задаёт байт урона — всегда выключено (настройка не упоминается).
+     */
+    fun setDamageWatchEnabled(on: Boolean) {
+        damageVibeOn = on && GameConfig.damageWatch != null
+        Native.setDamageWatchEnabled(damageVibeOn)
+    }
+
+    private fun vibrateDamage() {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastDamageVibeMs < 250) return // непрерывный слив HP — не тараторим
+        lastDamageVibeMs = now
+        try {
+            vibrator?.vibrate(
+                VibrationEffect.createOneShot(45, VibrationEffect.DEFAULT_AMPLITUDE)
+            )
+        } catch (_: Exception) {}
+    }
+
     fun stop() {
         running = false
         audioRunning = false
@@ -333,6 +381,10 @@ class EmulatorEngine(private val context: Context) {
                 Native.setInput(InputState.compose(frameIndex, fps, 0), 0)
             }
             Native.runFrame()
+
+            // Вибро-отклик урона: опрос атомика раз в кадр — один exchange,
+            // вызывается ТОЛЬКО когда включен (иначе ноль накладных вызовов)
+            if (damageVibeOn && Native.consumeDamageHit()) vibrateDamage()
 
             frameBitmap?.let { bmp ->
                 frameBuffer?.let { fb ->
