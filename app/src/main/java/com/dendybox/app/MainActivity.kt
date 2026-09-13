@@ -92,9 +92,11 @@ private fun AppRoot() {
     val context = LocalContext.current
     SettingsStore.init(context)
     // Конфиг игры (roms/<flavor>.json → assets/game.json): байт урона для
-    // вибро-отклика. Файл опционален; читается один раз, до старта движка
+    // вибрации при уроне и видимость сетевого режима. Файл опционален;
+    // читается один раз, до старта движка
     remember { GameConfig.load(context) }
     val hasDamageWatch = GameConfig.damageWatch != null
+    val netplayEnabled = GameConfig.netplayEnabled
 
     val engine = remember { EmulatorEngine(context) }
     var started by remember { mutableStateOf(false) }
@@ -142,8 +144,9 @@ private fun AppRoot() {
         InputState.turboHzB = SettingsStore.turboHzB.value
         launch { SettingsStore.turboHzA.collect { InputState.turboHzA = it } }
         launch { SettingsStore.turboHzB.collect { InputState.turboHzB = it } }
-        // «Вибро-отклик» управляет и нажатиями, и вибрацией урона (если игра
-        // задаёт байт урона в конфиге). collect выдаёт текущее значение сразу
+        // «Вибрация при получении урона» — единственная вибрация в приложении
+        // (если игра задаёт байт урона в конфиге; иначе настройка скрыта и
+        // движок всегда выключен). collect выдаёт текущее значение сразу
         launch { SettingsStore.haptics.collect { engine.setDamageWatchEnabled(it) } }
     }
 
@@ -184,6 +187,7 @@ private fun AppRoot() {
         onScreen = { screen = it },
         cheatsRepo = cheatsRepo,
         hasDamageWatch = hasDamageWatch,
+        netplayEnabled = netplayEnabled,
         onSoundChange = { engine.setSound(it) },
         onExit = {
             engine.stop()

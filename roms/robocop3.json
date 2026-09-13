@@ -1,4 +1,5 @@
 {
+  "netplay": false,
   "damage": {
     "addr": "0x063E",
     "mode": "dec",

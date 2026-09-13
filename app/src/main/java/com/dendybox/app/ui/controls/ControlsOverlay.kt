@@ -1,6 +1,5 @@
 package com.dendybox.app.ui.controls
 
-import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -36,7 +35,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -440,7 +438,6 @@ fun DpadLayer(
     p2Style: Boolean = false
 ) {
     val gid = if (p2Style) LayoutStore.GroupId.DPAD2 else LayoutStore.GroupId.DPAD
-    val view = LocalView.current
     val density = LocalDensity.current
     val dpadBaseR by SettingsStore.dpadSize.collectAsState()
     val g = store.group(gid) // recomposition при изменении позиции/масштаба
@@ -512,11 +509,6 @@ fun DpadLayer(
                                     if (bits != st.bits) {
                                         st.bits = bits
                                         onBits(bits)
-                                        if (SettingsStore.haptics.value) {
-                                            view.performHapticFeedback(
-                                                HapticFeedbackConstants.KEYBOARD_TAP
-                                            )
-                                        }
                                     }
                                 }
 

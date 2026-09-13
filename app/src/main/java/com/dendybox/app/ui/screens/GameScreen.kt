@@ -61,6 +61,7 @@ fun GameScreen(
     onScreen: (Screen) -> Unit,
     cheatsRepo: CheatRepository?,
     hasDamageWatch: Boolean = false,
+    netplayEnabled: Boolean = true,
     onSoundChange: (Boolean) -> Unit,
     onExit: () -> Unit,
     onSurfaceCreated: (SurfaceHolder) -> Unit,
@@ -273,6 +274,9 @@ fun GameScreen(
                     }
                 },
                 onExit = onExit,
+                // Сетевой режим скрывается для одиночных игр (флаг netplay
+                // в конфиге игры); сам netLocked тогда невозможен
+                netEnabled = netplayEnabled,
                 netLocked = engine.isNetActive(),
                 onNetBlocked = { toast("В сетевой игре это недоступно") }
             )

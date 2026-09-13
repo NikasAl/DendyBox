@@ -13,7 +13,7 @@ object SettingsStore {
     val turboHzA = MutableStateFlow(14f)      // частота автоповтора A, Гц
     val turboHzB = MutableStateFlow(14f)      // частота автоповтора B, Гц
     val sound = MutableStateFlow(true)
-    val haptics = MutableStateFlow(true)      // вибро-отклик крестовины
+    val haptics = MutableStateFlow(true)      // вибрация при уроне (если игра задаёт байт урона)
     val dpadSize = MutableStateFlow(58f)      // радиус крестовины, dp
     val controlsOpacity = MutableStateFlow(0.55f) // прозрачность кнопок
     val twoLocal = MutableStateFlow(false)    // локальный режим «2 игрока» на одном экране

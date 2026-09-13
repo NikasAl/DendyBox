@@ -34,7 +34,7 @@ object Native {
      */
     external fun setDamageWatch(addr: Int, mode: Int, value: Int)
 
-    /** Включить/выключить проверку (переключатель «Вибро-отклик»). */
+    /** Включить/выключить проверку (переключатель «Вибрация при получении урона»). */
     external fun setDamageWatchEnabled(on: Boolean)
 
     /** true — с прошлого вызова байт изменился по заданному правилу (опрос раз в кадр). */

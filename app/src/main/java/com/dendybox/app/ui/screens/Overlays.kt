@@ -125,6 +125,7 @@ fun PauseOverlay(
     onSettings: () -> Unit,
     onNet: () -> Unit,
     onExit: () -> Unit,
+    netEnabled: Boolean = true,
     netLocked: Boolean = false,
     onNetBlocked: () -> Unit = {}
 ) {
@@ -160,11 +161,15 @@ fun PauseOverlay(
                         MenuButton("Квик-сейв", guarded(onQuickSave), Modifier.weight(1f))
                         MenuButton("Квик-лоад", guarded(onQuickLoad), Modifier.weight(1f))
                     }
-                    MenuButton(
-                        if (netLocked) "Отключить сетевую игру" else "Игра по сети (2 игрока)",
-                        onNet,
-                        icon = Icons.Filled.VideogameAsset
-                    )
+                    // Сетевой режим виден только если игра его поддерживает
+                    // (флаг netplay в конфиге игры; одиночные игры — без пункта)
+                    if (netEnabled) {
+                        MenuButton(
+                            if (netLocked) "Отключить сетевую игру" else "Игра по сети (2 игрока)",
+                            onNet,
+                            icon = Icons.Filled.VideogameAsset
+                        )
+                    }
                     MenuButton(
                         "Сброс картриджа (начать заново)",
                         guarded(onReset),
@@ -373,17 +378,12 @@ fun SettingsPanel(
                 sound
             ) { SettingsStore.setSound(it); onSoundChange(it) }
             if (hasDamageWatch) {
-                // Игра задаёт байт урона (roms/<flavor>.json): переключатель
-                // управляет и нажатиями, и вибрацией при получении урона
+                // Игра задаёт байт урона (roms/<flavor>.json): единственная
+                // вибрация в приложении — при получении урона. Без конфига
+                // настройка не показывается вовсе
                 SettingSwitch(
-                    "Вибро-отклик",
-                    "При нажатиях и при получении урона в этой игре",
-                    haptics
-                ) { SettingsStore.setHaptics(it) }
-            } else {
-                SettingSwitch(
-                    "Вибро-отклик крестовины",
-                    "Короткая вибрация при нажатии направлений",
+                    "Вибрация при получении урона",
+                    "Короткий импульс, когда персонаж получает урон в этой игре",
                     haptics
                 ) { SettingsStore.setHaptics(it) }
             }
