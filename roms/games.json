@@ -2,5 +2,13 @@
   "robocop3.nes": {
     "flavor": "robocop3",
     "title": "RoboCop 3"
+  },
+  "soccer.nes": {
+    "flavor": "soccer",
+    "title": "Футбол"
+  },
+  "gatoor.nes": {
+    "flavor": "gatoor",
+    "title": "Трёхглазый Сяраку"
   }
 }
