@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -338,6 +339,11 @@ private fun GameButton(
     onPress: (Boolean) -> Unit
 ) {
     val opacity by SettingsStore.controlsOpacity.collectAsState()
+    // pointerInput-корутины живут дольше рекомпозиций — колбэки читаем через
+    // rememberUpdatedState, иначе корутина держит лямбду первого состава
+    // (с устаревшим inputPort — например, до включения netplay)
+    val currentOnPress by rememberUpdatedState(onPress)
+    val currentOnSelect by rememberUpdatedState(onSelect)
     val isTurbo = spec.id == "TA" || spec.id == "TB"
     val isPill = spec.id == "SELECT" || spec.id == "START"
     val shape = if (isPill) RoundedCornerShape(12.dp) else CircleShape
@@ -362,11 +368,11 @@ private fun GameButton(
                     // захваченные «на старте» значения устаревают.
                     Modifier
                         .pointerInput(gid) {
-                            detectTapGestures(onTap = { onSelect() })
+                            detectTapGestures(onTap = { currentOnSelect() })
                         }
                         .pointerInput(parentPx, gid) {
                             detectDragGestures(
-                                onDragStart = { onSelect() },
+                                onDragStart = { currentOnSelect() },
                                 onDrag = { change, dragAmount ->
                                     change.consume()
                                     moveGroupBy(
@@ -381,12 +387,12 @@ private fun GameButton(
                         detectTapGestures(
                             onPress = {
                                 pressed = true
-                                onPress(true)
+                                currentOnPress(true)
                                 try {
                                     awaitRelease()
                                 } finally {
                                     pressed = false
-                                    onPress(false)
+                                    currentOnPress(false)
                                 }
                             }
                         )
@@ -442,6 +448,10 @@ fun DpadLayer(
     val dpadBaseR by SettingsStore.dpadSize.collectAsState()
     val g = store.group(gid) // recomposition при изменении позиции/масштаба
     val st = remember { DpadState() }
+    // см. GameButton: pointerInput живёт дольше рекомпозиций — читаем
+    // актуальные колбэки через rememberUpdatedState
+    val currentOnBits by rememberUpdatedState(onBits)
+    val currentOnSelect by rememberUpdatedState(onSelect)
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val parentPx = IntSize(constraints.maxWidth, constraints.maxHeight)
@@ -460,12 +470,12 @@ fun DpadLayer(
                         editing -> Modifier
                             .pointerInput(parentPx) {
                                 detectTapGestures(
-                                    onTap = { onSelect(gid) }
+                                    onTap = { currentOnSelect(gid) }
                                 )
                             }
                             .pointerInput(parentPx, dpadBaseR) {
                                 detectDragGestures(
-                                    onDragStart = { onSelect(gid) },
+                                    onDragStart = { currentOnSelect(gid) },
                                     onDrag = { change, dragAmount ->
                                         change.consume()
                                         moveGroupBy(
@@ -508,7 +518,7 @@ fun DpadLayer(
                                 fun applyBits() {
                                     if (bits != st.bits) {
                                         st.bits = bits
-                                        onBits(bits)
+                                        currentOnBits(bits)
                                     }
                                 }
 
@@ -531,7 +541,7 @@ fun DpadLayer(
 
                                 // Палец отпущен — направления сбрасываются сразу
                                 st.bits = 0
-                                onBits(0)
+                                currentOnBits(0)
                             }
                         }
                         else -> Modifier

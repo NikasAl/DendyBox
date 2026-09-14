@@ -69,6 +69,15 @@ class NetSession internal constructor(
     private val dout = BufferedOutputStream(sock.getOutputStream(), 16384)
     private val closed = AtomicBoolean(false)
 
+    init {
+        // Таймаут чтения для ФАЗЫ СОЕДИНЕНИЯ (хендшейк, передача стейта):
+        // молчащий 15 секунд пир — это ошибка соединения, а не «игра на паузе».
+        // В самой игре таймаут снимается (enterLockstep): пауза одного игрока
+        // (звонок, свернули приложение) не должна рвать сессию — второй честно
+        // ждёт возобновления.
+        try { sock.soTimeout = 15000 } catch (_: Exception) {}
+    }
+
     /** События сессии — всегда в главном потоке. */
     var onEvent: (NetEvent) -> Unit = {}
 
@@ -135,6 +144,8 @@ class NetSession internal constructor(
      * кадров (джиттер-буфер). Вызывается один раз перед первым кадром.
      */
     fun enterLockstep() {
+        // Игровой обмен — без таймаута чтения: пауза/звонок у пира не ошибка
+        try { sock.soTimeout = 0 } catch (_: Exception) {}
         buf.clear()
         localBuf.clear()
         head = 0
@@ -366,7 +377,12 @@ class NetServer internal constructor(
     init {
         thread(name = "net-host") {
             try {
-                val ss = ServerSocket(port, 2, InetAddress.getByName("0.0.0.0"))
+                // SO_REUSEADDR задаётся ДО bind: после прошлой сессии в порту
+                // могут оставаться TIME_WAIT-соединения — без флага повторный
+                // «Создать игру» падает с «Address already in use»
+                val ss = ServerSocket()
+                try { ss.reuseAddress = true } catch (_: Exception) {}
+                ss.bind(InetSocketAddress(InetAddress.getByName("0.0.0.0"), port), 2)
                 server = ss
                 while (!closed.get()) {
                     val s = try {
@@ -379,6 +395,9 @@ class NetServer internal constructor(
                     }
                     s.tcpNoDelay = true
                     try {
+                        // Хендшейк с таймаутом: молчащий/зависший гость не должен
+                        // подвешивать принимающий поток (иначе «Отмена» не спасёт)
+                        try { s.soTimeout = 8000 } catch (_: Exception) {}
                         val hello = readLineOf(s.getInputStream())
                         val parts = hello.split('|')
                         val peerProto = parts.getOrElse(1) { "" }.toIntOrNull()
@@ -399,6 +418,12 @@ class NetServer internal constructor(
                         val ns = NetSession(s, isHost = true, peerVersion = peerVer)
                         ns.onEvent = onEvent
                         session = ns
+                        // Единственный гость найден — слушатель больше не нужен.
+                        // Закрываем СРАЗУ: иначе принимающий сокет остаётся занятым
+                        // портом до сборки мусора, и повторное «Создать игру» (в том
+                        // числе после выхода из игры и повторного входа) падает с
+                        // «Address already in use»
+                        try { ss.close() } catch (_: Exception) {}
                         main.post { onSession(ns) }
                         return@thread // один игрок — достаточно
                     } catch (e: Exception) {

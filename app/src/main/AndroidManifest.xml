@@ -4,6 +4,10 @@
     <!-- Понадобится на этапе netplay (этап 5). Пока не используется. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- WifiLock низколатентного Wi-Fi на время сетевой игры: без него
+         Wi-Fi power-save даёт скачки задержки в сотни мс — фризы в lockstep -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- Вибро-отклик: нажатия крестовины (Vibrator) и урон в игре
          (байт RAM из конфига игры, roms/<flavor>.json) -->
     <uses-permission android:name="android.permission.VIBRATE" />

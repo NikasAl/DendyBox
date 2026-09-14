@@ -9,6 +9,7 @@ import android.graphics.RectF
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -62,8 +63,11 @@ class EmulatorEngine(private val context: Context) {
     private var audioThread: Thread? = null
     @Volatile private var audioRunning = false
     @Volatile private var underruns = 0L
+    // Частота сэмплов дорожки — для пересчёта полосы кольца при вкл/выкл netplay
+    @Volatile private var audioSampleRate = 0
     // Полоса уровня кольца (в стерео-сэмплах int16): ниже — гоним кадры без сна,
-    // выше — притормаживаем; внутри — такт по таймеру с дрейф-коррекцией
+    // выше — притормаживаем; внутри — такт по таймеру с дрейф-коррекцией.
+    // В netplay полоса расширяется (см. attachNet) — запас на скачки Wi-Fi
     @Volatile private var ringLow = 0
     @Volatile private var ringHigh = 0
 
@@ -91,21 +95,53 @@ class EmulatorEngine(private val context: Context) {
     // Штатный локальный разрыв связи: обрыв сокета не считается ошибкой —
     // игра продолжается соло без паузы (см. обработчик catch в loop())
     @Volatile private var netGracefulDetach = false
+    // Wi-Fi в режиме экономии даёт скачки задержки до сотен мс — для lockstep
+    // это фризы. На время сетевой игры держим низколатентный WifiLock
+    @Volatile private var wifiLock: WifiManager.WifiLock? = null
 
     fun isNetActive(): Boolean = netSession != null
 
     /** Порт локального игрока в сетевой игре (хост — 0, гость — 1). */
     fun netLocalPort(): Int = netLocalPort
 
-    /** Включить сетевой режим (вызывается из потока эмуляции, кадры с нуля). */
-    fun attachNet(session: NetSession, localPort: Int) = runOnLoop {
+    /**
+     * Включить сетевой режим. Поля задаёт СИНХРОННО, а не через очередь потока
+     * эмуляции: сразу после вызова UI строит экран игры и читает
+     * isNetActive()/netLocalPort(). Постановка через очередь (runOnLoop) давала
+     * гонку — цикл спит по 20 мс, и джойстик гостя привязывался к порту 0
+     * вместо 1 (нажатия «игнорировались»). Вызов происходит при стоящем на
+     * паузе цикле кадров (панель сети), поэтому гонки с исполнением кадров нет.
+     */
+    fun attachNet(session: NetSession, localPort: Int) {
         netSession = session
         netLocalPort = localPort
         frameIndex = 0
+        // Полоса кольца шире: запас звука на скачки Wi-Fi-задержки (цель DRC —
+        // середина полосы, см. audioLoop). Реальные уровни: 90..240 мс
+        if (audioSampleRate > 0) {
+            ringLow = audioSampleRate * 180 / 1000
+            ringHigh = audioSampleRate * 480 / 1000
+        }
+        acquireWifiLock()
     }
 
     /** Выключить сетевой режим (после обрыва/выхода). */
-    fun detachNet() = runOnLoop { netSession = null }
+    fun detachNet() {
+        netTeardown()
+        runOnLoop { netSession = null }
+    }
+
+    /**
+     * Сброс сетевого окружения: обычная полоса аудио + освобождение WifiLock.
+     * Идемпотентен, безопасен из любого потока (поля @Volatile).
+     */
+    private fun netTeardown() {
+        if (audioSampleRate > 0) {
+            ringLow = audioSampleRate * 60 / 1000
+            ringHigh = audioSampleRate * 300 / 1000
+        }
+        releaseWifiLock()
+    }
 
     /**
      * Штатное отключение по инициативе локального игрока (кнопка «Отключить
@@ -117,6 +153,7 @@ class EmulatorEngine(private val context: Context) {
         // 1) закрыть сокет — будит поток кадра, если он ждёт ввода пира;
         // 2) очистить состояние в потоке эмуляции (и снять флаг там же,
         //    чтобы не «проглотить» будущий настоящий обрыв связи)
+        netTeardown()
         try { netSession?.requestClose(null) } catch (_: Exception) {}
         runOnLoop {
             netSession = null
@@ -309,6 +346,7 @@ class EmulatorEngine(private val context: Context) {
     fun stop() {
         running = false
         audioRunning = false
+        netTeardown()
         // Сетевая сессия может держать поток кадра в blocking-чтении —
         // закрываем сокет, чтобы join не повис
         try { netSession?.requestClose(null) } catch (_: Exception) {}
@@ -368,6 +406,7 @@ class EmulatorEngine(private val context: Context) {
                     // иначе связь потеряна/рассинхрон: пауза + уведомление
                     // пользователя через колбэк сессии (главный поток)
                     netSession = null
+                    netTeardown()
                     if (netGracefulDetach) {
                         netGracefulDetach = false
                     } else {
@@ -424,7 +463,17 @@ class EmulatorEngine(private val context: Context) {
                     // Звука нет вовсе — запасной такт по таймеру
                     if (nextNs > now) sleepQuiet((nextNs - now) / 1_000_000)
                 ring < ringLow -> {} // отстаём от звуковых часов — не спим
-                ring > ringHigh -> sleepQuiet(3) // забегаем — чуть притормозим
+                ring > ringHigh -> {
+                    // Кольцо переполнено — игра забежала вперёд звуковых часов.
+                    // Ждём, пока ЦАП съест излишек до верхней кромки: производство
+                    // встаёт ровно в темп звуковых часов и кольцо больше не растёт.
+                    // (Прежний sleepQuiet(3) не тормозил, а разгонял цикл до ~100 fps
+                    // — кольцо уходило в потолок с выбрасыванием сэмплов ядром.)
+                    var guard = 0
+                    while (running && guard++ < 250 && Native.audioLevel() > ringHigh) {
+                        sleepQuiet(4)
+                    }
+                }
                 nextNs > now -> sleepQuiet((nextNs - now) / 1_000_000)
                 else -> {}
             }
@@ -480,6 +529,7 @@ class EmulatorEngine(private val context: Context) {
 
     private fun setupAudio() {
         val rate = Native.avSampleRate().toInt().coerceIn(8000, 96000)
+        audioSampleRate = rate
         val ch = AudioFormat.CHANNEL_OUT_STEREO
         val minBuf = AudioTrack.getMinBufferSize(rate, ch, AudioFormat.ENCODING_PCM_16BIT)
         // Буфер устройства ~83 мс: основной запас живёт в кольце перед аудиопотоком
@@ -518,6 +568,14 @@ class EmulatorEngine(private val context: Context) {
      * подкладываем короткую тишину: устройство продолжает потреблять данные
      * и НЕ зацикливает старое содержимое своего буфера (тот самый «эффект эха»,
      * когда AudioTrack при недогрузке многократно проигрывает остаток буфера).
+     *
+     * DRC (только netplay): в lockstep темп кадров ОБЩИЙ для обеих машин, а
+     * частоты ЦАП у телефонов чуть разные. У игрока, чей ЦАП «быстрее» темпа
+     * пира, кольцо монопольно пустеет — пир физически не может поставлять
+     * кадры быстрее своего собственного темпа. Поэтому раз в секунду
+     * подстраиваем темп проигрывания (±1,2% — сдвиг высоты тона незаметен):
+     * кольцо ниже цели — потребляем медленнее, выше — быстрее. Так обе
+     * стороны держат кольцо у цели и живут без underruns.
      */
     private fun audioLoop() {
         // Аудиопоток чувствительнее всех к задержкам: недогруз дорожки слышен
@@ -527,6 +585,9 @@ class EmulatorEngine(private val context: Context) {
         val silence = ShortArray(sr / 200 * 2) // ~5 мс тишины
         val ab = audioBuf
         var lastLogNs = System.nanoTime()
+        var lastDrcNs = System.nanoTime()
+        var drc = 1.0        // текущий множитель темпа проигрывания
+        var appliedRate = -1 // последний выставленный в дорожку темп
         try {
             while (audioRunning) {
                 val t = audioTrack ?: break
@@ -541,6 +602,27 @@ class EmulatorEngine(private val context: Context) {
                 if (t.playState != AudioTrack.PLAYSTATE_PLAYING) {
                     try { t.play() } catch (_: Exception) {}
                 }
+
+                // --- DRC-подстройка темпа проигрывания (раз в секунду) ---
+                val nowNs = System.nanoTime()
+                if (nowNs - lastDrcNs >= 1_000_000_000L) {
+                    lastDrcNs = nowNs
+                    val want = if (netSession != null) {
+                        val band = (ringHigh - ringLow).coerceAtLeast(1)
+                        // err > 0 — кольцо ниже цели: потреблять медленнее (хотим < 1)
+                        val err = (ringLow + band / 2.0 - Native.audioLevel()) / band
+                        1.0 - (err * 0.024).coerceIn(-0.012, 0.012)
+                    } else {
+                        1.0
+                    }
+                    drc += (want - drc) * 0.6
+                    val rate = (sr * drc).toInt().coerceIn(sr / 2, sr * 2)
+                    if (rate != appliedRate) {
+                        appliedRate = rate
+                        try { t.setPlaybackRate(rate) } catch (_: Exception) {}
+                    }
+                }
+
                 var n = 0
                 if (ab != null) {
                     ab.clear()
@@ -556,12 +638,15 @@ class EmulatorEngine(private val context: Context) {
                     t.write(silence, 0, silence.size)
                     sleepQuiet(2)
                 }
-                val nowNs = System.nanoTime()
-                if (nowNs - lastLogNs >= 15_000_000_000L) {
-                    lastLogNs = nowNs
-                    Log.i("DendyBox", "audio: ring=${Native.audioLevel()} underruns=$underruns")
+                val logNs = System.nanoTime()
+                if (logNs - lastLogNs >= 15_000_000_000L) {
+                    lastLogNs = logNs
+                    Log.i("DendyBox", "audio: ring=${Native.audioLevel()} underruns=$underruns" +
+                        if (drc != 1.0) " drc=${"%+.1f".format((drc - 1) * 100)}%" else "")
                 }
             }
+            // Номинальный темп на выходе (если дорожка ещё жива)
+            try { audioTrack?.setPlaybackRate(sr) } catch (_: Exception) {}
         } catch (_: Throwable) {
             // дорожка освобождена при stop() — тихо выходим
         }
@@ -591,5 +676,30 @@ class EmulatorEngine(private val context: Context) {
 
     private fun sleepQuiet(ms: Long) {
         try { Thread.sleep(ms) } catch (_: InterruptedException) {}
+    }
+
+    // --- WifiLock на время сетевой игры (против скачков Wi-Fi power-save) ---
+
+    private fun acquireWifiLock() {
+        if (wifiLock != null) return
+        try {
+            val wm = context.applicationContext
+                .getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+            else
+                @Suppress("DEPRECATION") WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            val lock = wm.createWifiLock(mode, "DendyBox:netplay")
+            lock.setReferenceCounted(false)
+            lock.acquire()
+            wifiLock = lock
+        } catch (_: Exception) {}
+    }
+
+    private fun releaseWifiLock() {
+        wifiLock?.let { l ->
+            try { if (l.isHeld) l.release() } catch (_: Exception) {}
+        }
+        wifiLock = null
     }
 }

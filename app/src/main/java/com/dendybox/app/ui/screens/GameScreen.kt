@@ -110,8 +110,13 @@ fun GameScreen(
 
         if (started && screen == Screen.GAME) {
             val netLocked = engine.isNetActive()
-            // В сетевой игре весь локальный ввод идёт в порт своей стороны
-            val myPort = if (netLocked) engine.netLocalPort() else 0
+            // Порт СВОЕЙ стороны в сетевой игре читаем В МОМЕНТ СОБЫТИЯ, а не
+            // при композиции: pointerInput-корутины не пересоздаются при
+            // рекомпозиции и держат захваченные «на старте» лямбды. Порт,
+            // захваченный значением, приклеивался навсегда — у гостя он мог
+            // оказаться 0 вместо 1 (гонка с attachNet), и нажатия
+            // «игнорировались». Лямбда ниже всегда читает актуальное состояние.
+            val myPort = { if (engine.isNetActive()) engine.netLocalPort() else 0 }
             // Верхняя панель: слева пауза и Mute, справа квик-сейв/лоад и настройки управления
             Row(
                 Modifier
@@ -156,9 +161,9 @@ fun GameScreen(
                 store = layoutStore,
                 editing = false,
                 enabled = true,
-                onBits = { InputState.setDirs(it, myPort) }
+                onBits = { InputState.setDirs(it, myPort()) }
             )
-            ControlsLayer(store = layoutStore, editing = false, inputPort = myPort)
+            ControlsLayer(store = layoutStore, editing = false, inputPort = myPort())
 
             // Второй джойстик для локальной игры на двоих (по сети он не нужен —
             // второй игрок играет со своего телефона)

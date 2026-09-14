@@ -20,6 +20,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -108,6 +109,19 @@ fun NetPanel(
         phase = "choose"
         status = ""
         error = null
+    }
+
+    // Панель ушла с экрана, не передав игру движку (системный «Назад», выход
+    // из приложения во время ожидания/подключения): глушим сессию и слушатель.
+    // Без этого принимающий сокет оставался бы занятым портом до сборки
+    // мусора — и повторное «Создать игру» падало с «Address already in use».
+    DisposableEffect(Unit) {
+        onDispose {
+            if (!handedOver.value) {
+                session?.requestClose(null)
+                server?.close()
+            }
+        }
     }
 
     Box(
