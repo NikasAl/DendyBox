@@ -15,7 +15,7 @@ ROM'ы лежат в папке `roms/` в корне проекта (в git Н�
 
 ```
 roms/
-├── games.json      — описание сборок: файл ROM → flavor + название игры
+├── games.json      — описание сборок: файл ROM → flavor + название + версия
 └── robocop3.nes    — сам ROM (у вас локально)
 ```
 
@@ -23,13 +23,17 @@ roms/
 
 ```json
 {
-  "robocop3.nes": { "flavor": "robocop3", "title": "RoboCop 3" }
+  "robocop3.nes": {
+    "flavor": "robocop3", "title": "RoboCop 3",
+    "versionName": "1.1", "versionCode": 2
+  }
 }
 ```
 
 Каждый ROM = отдельное приложение `com.dendybox.app.<flavor>` с названием
-«DendyBox: <title>». Если записи в `games.json` нет — flavor создаётся
-автоматически из имени файла. Подробности — `roms/README.md`.
+«DendyBox: <title>» и своей версией (не указана — 1.0 / versionCode 1).
+Если записи в `games.json` нет — flavor создаётся автоматически из имени
+файла. Подробности — `roms/README.md`.
 Проверка формата: `./scripts/check_rom.sh roms/robocop3.nes`
 
 ## Шаг 2. Ядро эмулятора
@@ -142,6 +146,10 @@ adb connect <IP-телефона>:5555`. Несколько устройств �
   ЕДИНственный бэкап `keystore/` в надёжном месте.
 * **Оптимизация размера**: без x86/x86_64 (только `arm64-v8a` +
   `armeabi-v7a`), R8-минификация + сжатие ресурсов, локали только `ru`.
+* **Версия APK** — по flavor'ам из `roms/games.json` (`versionName`/
+  `versionCode`): обновляете игру в магазине — поднимите ей версию, остальные
+  игры остаются на своей. Резолв печатается в начале сборки
+  (`DendyBox: версии — …`); поднять: `./scripts/bump_version.sh robocop3 1.2`.
 * **Имя APK**: `app/build/outputs/apk/<flavor>/release/DendyBox-<flavor>-<версия>-release.apk`.
 * **Иконка игры**: если есть `metadata/<flavor>/icon.png` — из неё автоматически
   готовится иконка лаунчера (adaptive, webp) и `metadata/<flavor>/icon512.png`

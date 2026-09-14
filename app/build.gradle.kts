@@ -24,11 +24,20 @@ plugins {
 //
 // Каждый ROM из папки roms/ превращается в product flavor — самостоятельное
 // приложение com.dendybox.app.<flavor> с ОДНИМ ROM внутри (assets/rom.nes).
-// Имя flavor'а, заголовок приложения и ROM-файл задаются в roms/games.json:
+// Имя flavor'а, заголовок приложения, версия и ROM-файл задаются в
+// roms/games.json:
 //
 //   {
-//     "robocop3.nes": { "flavor": "robocop3", "title": "RoboCop 3" }
+//     "robocop3.nes": {
+//       "flavor": "robocop3", "title": "RoboCop 3",
+//       "versionName": "1.1", "versionCode": 2
+//     }
 //   }
+//
+// Версия (versionName/versionCode) — ПО ФЛАВОРАМ: обновление в магазине
+// требует увеличить versionCode той игры, которую обновляете, остальные
+// сборки продолжают собираться с версией по умолчанию (1.0 / 1).
+// Удобно: ./scripts/bump_version.sh <flavor> <новая_версия>
 //
 // Если games.json нет, flavor создаётся автоматически из имени файла
 // («RoboCop 3.nes» → flavor robocop3). ROM'ы в git НЕ коммитятся (публичный
@@ -38,12 +47,52 @@ plugins {
 val romsDir = rootProject.file("roms")
 val gamesJsonFile = romsDir.resolve("games.json")
 
-data class GameSpec(val fileName: String, val file: File?, val flavor: String, val title: String)
+data class GameSpec(
+    val fileName: String,
+    val file: File?,
+    val flavor: String,
+    val title: String,
+    val versionCode: Int,
+    val versionName: String,
+)
 
 fun sanitizeFlavorName(raw: String): String {
     val cleaned = raw.lowercase().filter { it in 'a'..'z' || it in '0'..'9' }
     // applicationId-сегмент не может начинаться с цифры и не может быть пустым
     return if (cleaned.isEmpty() || cleaned[0] !in 'a'..'z') "game$cleaned" else cleaned
+}
+
+// Версия flavor'а из его записи в games.json: { "versionName": "1.1",
+// "versionCode": 2 }. Не указано — дефолт 1.0 / 1 (новые игры стартуют с 1).
+// versionCode должен строго расти для обновлений в магазине (RuStore/Play),
+// поэтому ошибки в этих полях — всегда GradleException, а не молчаливый дефолт.
+private val DEFAULT_VERSION_NAME = "1.0"
+private val DEFAULT_VERSION_CODE = 1
+
+private fun parseVersionName(o: Map<*, *>, flavor: String): String {
+    val raw = o["versionName"] ?: return DEFAULT_VERSION_NAME
+    if (raw !is String || raw.isBlank()) {
+        throw GradleException("roms/games.json [$flavor]: versionName должен быть непустой строкой, получено: $raw")
+    }
+    if (raw.length > 32 || !raw.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]*"))) {
+        throw GradleException("roms/games.json [$flavor]: versionName \"$raw\" — допустимы латиница/цифры/./_/- (начало с буквы или цифры, до 32 символов)")
+    }
+    return raw
+}
+
+private fun parseVersionCode(o: Map<*, *>, flavor: String): Int {
+    val raw = o["versionCode"] ?: return DEFAULT_VERSION_CODE
+    if (raw !is Number) {
+        throw GradleException("roms/games.json [$flavor]: versionCode должен быть целым числом, получено: $raw")
+    }
+    if (raw.toDouble().rem(1.0) != 0.0) {
+        throw GradleException("roms/games.json [$flavor]: versionCode должен быть целым числом, получено: $raw")
+    }
+    val code = raw.toInt()
+    if (code < 1 || code > 2_100_000_000) {
+        throw GradleException("roms/games.json [$flavor]: versionCode $code вне допустимого диапазона 1..2100000000")
+    }
+    return code
 }
 
 val gameSpecs: List<GameSpec> = run {
@@ -70,7 +119,11 @@ val gameSpecs: List<GameSpec> = run {
         val o: Map<*, *> = overrides[name] ?: emptyMap<String, Any>()
         val flavorRaw = (o["flavor"] as? String) ?: File(name).nameWithoutExtension
         val title = (o["title"] as? String) ?: File(name).nameWithoutExtension
-        GameSpec(name, romFiles.firstOrNull { it.name == name }, sanitizeFlavorName(flavorRaw), title)
+        val flavor = sanitizeFlavorName(flavorRaw)
+        GameSpec(
+            name, romFiles.firstOrNull { it.name == name }, flavor, title,
+            parseVersionCode(o, name), parseVersionName(o, name)
+        )
     }
     val dup = specs.groupBy { it.flavor }.filterValues { it.size > 1 }.keys
     if (dup.isNotEmpty()) {
@@ -80,6 +133,16 @@ val gameSpecs: List<GameSpec> = run {
         println("DendyBox: в roms/ нет ROM-файлов и нет roms/games.json — product flavors не созданы")
     }
     specs
+}
+
+// Резолв версий печатается при каждой конфигурации — сразу видно, какая
+// версия уйдёт в APK (проверка перед выпуском обновления в магазин).
+if (gameSpecs.isNotEmpty()) {
+    println(
+        "DendyBox: версии — " + gameSpecs.joinToString(", ") {
+            "${it.flavor} ${it.versionName} (${it.versionCode})"
+        }
+    )
 }
 
 // ============================================================================
@@ -197,6 +260,9 @@ android {
             create(spec.flavor) {
                 dimension = "game"
                 applicationId = "com.dendybox.app.${spec.flavor}"
+                // Версия из games.json (версия по flavor'ам; см. шапку файла)
+                versionCode = spec.versionCode
+                versionName = spec.versionName
                 resValue("string", "app_name", "DendyBox: ${spec.title}")
             }
         }
@@ -240,7 +306,7 @@ android {
         checkReleaseBuilds = false
     }
 
-    // Понятные имена файлов: DendyBox-robocop3-1.0-release.apk
+    // Понятные имена файлов: DendyBox-robocop3-1.1-release.apk (версия из games.json)
     applicationVariants.all {
         outputs.all {
             (this as BaseVariantOutputImpl).outputFileName =
