@@ -12,5 +12,16 @@
   "gatoor.nes": {
     "flavor": "gatoor",
     "title": "Трёхглазый Сяраку"
+  },
+
+  "contra3in1.nes": {
+    "flavor": "contra3in1",
+    "title": "Контра: 3 в 1",
+    "games": [
+      { "file": "c_contra.nes",       "title": "Контра" },
+      { "file": "c_super_contra.nes", "title": "Супер Контра" },
+      { "file": "c_contra_force.nes",    "title": "Контра Форс" }
+    ]
   }
+
 }
