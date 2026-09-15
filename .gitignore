@@ -21,3 +21,9 @@ keystore/
 captures/
 .DS_Store
 .kotlin/
+
+# мультиром: тестовые артефакты
+tools/multicart/test/*.nes
+tools/multicart/test/mc_harness
+tools/multicart/test/_*
+tools/multicart/asm6f/asm6f

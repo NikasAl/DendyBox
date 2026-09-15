@@ -158,6 +158,22 @@ adb connect <IP-телефона>:5555`. Несколько устройств �
   `metadata/README.md → «Иконка игры»`.
 * ROM не положен в `roms/` — сборка падает с понятной ошибкой (не молча).
 
+### Сборник игр в одном ROM (мультиром)
+
+Можно склеить несколько UNROM-игр (Contra и подобные: mapper 2, PRG 128 КиБ,
+CHR-RAM) в один ROM с меню выбора — как пиратские «N-in-1» на Денди:
+
+```bash
+./scripts/make_multicart.sh -o kontra.nes \
+    -t "КОНТРА" -t "SUPER C" \
+    ~/roms/kontra.nes ~/roms/superc.nes
+```
+
+Полученный `kontra.nes` — обычный картридж: кладите в `roms/`, добавляйте
+в `games.json`, собирайте flavor. ↑↓/Start — выбор игры, RESET — возврат
+в меню. Игры патчевать не нужно. Подробности и ограничения:
+`tools/multicart/README.md`.
+
 ### Скриншоты и видео для магазина (adb)
 
 ```bash
