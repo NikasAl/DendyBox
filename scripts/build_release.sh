@@ -96,16 +96,19 @@ except Exception:
     sys.exit(0)
 want = sys.argv[1]
 for fname, meta in cfg.items():
-    fl = (meta or {}).get('flavor') or fname.rsplit('.', 1)[0].lower()
+    meta = meta or {}
+    fl = meta.get('flavor') or fname.rsplit('.', 1)[0].lower()
     if fl == want:
-        print(fname)
+        # Сборник «X in 1» (массив games): одиночный ROM не нужен,
+        # файлы игр валидирует сама сборка gradle (parseCollection)
+        print("COLLECTION" if meta.get('games') else fname)
         break
 PY
 )" || ROM_EXPECTED=""
 else
   ROM_EXPECTED=""
 fi
-if [ -n "$ROM_EXPECTED" ] && [ ! -f "roms/$ROM_EXPECTED" ]; then
+if [ -n "$ROM_EXPECTED" ] && [ "$ROM_EXPECTED" != "COLLECTION" ] && [ ! -f "roms/$ROM_EXPECTED" ]; then
   echo "ОШИБКА: ROM не найден: roms/$ROM_EXPECTED"
   echo "Положите файл в папку roms/ (см. roms/README.md) и повторите."
   exit 1

@@ -345,6 +345,16 @@ Java_com_dendybox_app_Native_loadRom(JNIEnv* env, jobject /*thiz*/, jbyteArray j
     info.size = g_rom.size();
     info.meta = nullptr;
 
+    // Повторная загрузка (сборник «X in 1»: выход в меню → другая игра):
+    // перед load_game обязательно выгружаем предыдущую игру
+    if (g_loaded) {
+        f_unload_game();
+        g_loaded = false;
+        g_ram = nullptr;
+        g_ram_size = 0;
+    }
+    { std::lock_guard<std::mutex> l(g_cheats_mtx); g_cheats.clear(); }
+
     g_loaded = f_load_game(&info);
     if (!g_loaded) return JNI_FALSE;
 

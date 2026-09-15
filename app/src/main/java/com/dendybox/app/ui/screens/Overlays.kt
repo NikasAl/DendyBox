@@ -125,6 +125,7 @@ fun PauseOverlay(
     onSettings: () -> Unit,
     onNet: () -> Unit,
     onExit: () -> Unit,
+    exitLabel: String = "Выход из игры",
     netEnabled: Boolean = true,
     netLocked: Boolean = false,
     onNetBlocked: () -> Unit = {}
@@ -180,7 +181,9 @@ fun PauseOverlay(
                     MenuButton("Настройки управления", onEdit)
                     MenuButton("Настройки", onSettings)
                     OutlinedButton(onClick = onExit, modifier = Modifier.fillMaxWidth()) {
-                        Text("Выход из игры")
+                        // У сборника «X игр в 1» кнопка возвращает в меню выбора:
+                        // текст передаётся из GameScreen (exitLabel)
+                        Text(exitLabel)
                     }
                 }
                 ScrollHint(

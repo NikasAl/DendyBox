@@ -11,9 +11,12 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -36,9 +39,11 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.dendybox.app.cheats.CheatRepository
 import com.dendybox.app.emulator.EmulatorEngine
 import com.dendybox.app.input.InputState
+import com.dendybox.app.settings.CollectionCatalog
 import com.dendybox.app.settings.GameConfig
 import com.dendybox.app.settings.SettingsStore
 import com.dendybox.app.ui.DendyBoxTheme
+import com.dendybox.app.ui.screens.CollectionMenu
 import com.dendybox.app.ui.screens.GameScreen
 import com.dendybox.app.ui.screens.Screen
 import kotlinx.coroutines.launch
@@ -106,6 +111,10 @@ private fun AppRoot() {
     var romMissing by remember { mutableStateOf(false) }
     var pendingSurface by remember { mutableStateOf<SurfaceHolder?>(null) }
     var cheatsRepo by remember { mutableStateOf<CheatRepository?>(null) }
+    // Сборник «X игр в 1» (assets/games/): null — обычная игра (rom.nes);
+    // selectedGame: -1 — меню сборника, >= 0 — выбранная игра
+    val collection = remember { CollectionCatalog.load(context) }
+    var selectedGame by remember { mutableStateOf(-1) }
 
     fun startEngineIfNeeded(h: SurfaceHolder) {
         when {
@@ -132,14 +141,8 @@ private fun AppRoot() {
         }
     }
 
-    // ROM из assets + связка настроек с вводом
+    // Настройки ввода/вибрации — один раз за жизнь активности
     LaunchedEffect(Unit) {
-        try {
-            romBytes = context.assets.open("rom.nes").use { it.readBytes() }
-        } catch (_: Exception) {
-            romMissing = true
-        }
-        pendingSurface?.let { startEngineIfNeeded(it) }
         InputState.turboHzA = SettingsStore.turboHzA.value
         InputState.turboHzB = SettingsStore.turboHzB.value
         launch { SettingsStore.turboHzA.collect { InputState.turboHzA = it } }
@@ -148,6 +151,26 @@ private fun AppRoot() {
         // (если игра задаёт байт урона в конфиге; иначе настройка скрыта и
         // движок всегда выключен). collect выдаёт текущее значение сразу
         launch { SettingsStore.haptics.collect { engine.setDamageWatchEnabled(it) } }
+    }
+
+    // ROM: одиночная игра — assets/rom.nes; сборник — выбранная игра из
+    // assets/games/. Повторный start после stop безопасен: Native.unload
+    // полностью деинициализирует ядро, сейвы привязаны к SHA-1 нового рома
+    LaunchedEffect(selectedGame) {
+        if (collection != null && selectedGame < 0) {
+            romBytes = null // показано меню сборника — ром не нужен
+            return@LaunchedEffect
+        }
+        try {
+            romBytes = if (collection == null) {
+                context.assets.open("rom.nes").use { it.readBytes() }
+            } else {
+                context.assets.open(collection.games[selectedGame].assetPath).use { it.readBytes() }
+            }
+        } catch (_: Exception) {
+            romMissing = true
+        }
+        pendingSurface?.let { startEngineIfNeeded(it) }
     }
 
     // Пауза на экранах меню (при уходе в паузу пишется автосейв)
@@ -176,7 +199,35 @@ private fun AppRoot() {
 
     val error = startError
     if (error != null) {
-        ErrorScreen(error)
+        // У сборника из ошибки можно вернуться в меню (например, одна из игр
+        // битая — остальные запускаются)
+        val backToMenu: (() -> Unit)? =
+            if (collection != null && selectedGame >= 0) {
+                {
+                    startError = null
+                    romMissing = false
+                    started = false
+                    cheatsRepo = null
+                    romBytes = null
+                    selectedGame = -1
+                }
+            } else null
+        ErrorScreen(error, onBack = backToMenu)
+        return
+    }
+
+    // Меню сборника «X игр в 1»: движок ещё не запущен (started = false),
+    // поверхность игры не создаётся, поэтому ядро стартует только после выбора
+    if (collection != null && selectedGame < 0) {
+        CollectionMenu(
+            collectionTitle = collection.title,
+            games = collection.games,
+            onPick = { idx ->
+                romMissing = false
+                selectedGame = idx
+            },
+            onExit = { (context as? Activity)?.finish() }
+        )
         return
     }
 
@@ -188,10 +239,21 @@ private fun AppRoot() {
         cheatsRepo = cheatsRepo,
         hasDamageWatch = hasDamageWatch,
         netplayEnabled = netplayEnabled,
+        exitLabel = if (collection != null) "В меню сборника" else "Выход из игры",
         onSoundChange = { engine.setSound(it) },
         onExit = {
             engine.stop()
-            (context as? Activity)?.finish()
+            if (collection != null) {
+                // Сборник: «Выход из игры» = возврат в меню выбора. Автосейв
+                // уже записан при входе в меню паузы; движок перезапустится
+                // при следующем выборе игры
+                started = false
+                cheatsRepo = null
+                screen = Screen.GAME
+                selectedGame = -1
+            } else {
+                (context as? Activity)?.finish()
+            }
         },
         onSurfaceCreated = { h -> startEngineIfNeeded(h) },
         onSurfaceDestroyed = { engine.attachSurface(null) }
@@ -199,12 +261,18 @@ private fun AppRoot() {
 }
 
 @Composable
-private fun ErrorScreen(message: String) {
+private fun ErrorScreen(message: String, onBack: (() -> Unit)? = null) {
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
     ) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(32.dp)) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp)
+        ) {
             Text(
                 message,
                 color = MaterialTheme.colorScheme.onBackground,
@@ -212,6 +280,14 @@ private fun ErrorScreen(message: String) {
                 fontSize = 16.sp,
                 lineHeight = 24.sp
             )
+            if (onBack != null) {
+                Button(
+                    onClick = onBack,
+                    modifier = Modifier.padding(top = 24.dp)
+                ) {
+                    Text("В меню сборника")
+                }
+            }
         }
     }
 }

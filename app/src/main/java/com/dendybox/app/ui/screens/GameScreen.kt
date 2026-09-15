@@ -62,6 +62,7 @@ fun GameScreen(
     cheatsRepo: CheatRepository?,
     hasDamageWatch: Boolean = false,
     netplayEnabled: Boolean = true,
+    exitLabel: String = "Выход из игры",
     onSoundChange: (Boolean) -> Unit,
     onExit: () -> Unit,
     onSurfaceCreated: (SurfaceHolder) -> Unit,
@@ -279,6 +280,7 @@ fun GameScreen(
                     }
                 },
                 onExit = onExit,
+                exitLabel = exitLabel,
                 // Сетевой режим скрывается для одиночных игр (флаг netplay
                 // в конфиге игры); сам netLocked тогда невозможен
                 netEnabled = netplayEnabled,

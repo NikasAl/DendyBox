@@ -27,6 +27,24 @@ plugins {
 // Имя flavor'а, заголовок приложения, версия и ROM-файл задаются в
 // roms/games.json:
 //
+// Кроме того, flavor может быть СБОРНИКОМ («X игр в 1»): вместо одного ROM
+// в записи задаётся массив games — тогда в APK кладутся ВСЕ указанные ROM
+// (assets/games/0.nes, 1.nes, …) + манифест assets/games/games.json, а при
+// запуске приложение показывает меню выбора игры (см. ui/screens/CollectionMenu):
+//
+//   "kontra8in1.nes": {
+//     "flavor": "kontra8in1", "title": "Контра: Сборник",
+//     "games": [
+//       { "file": "25_Contra.nes",       "title": "Контра" },
+//       { "file": "24_Super_Contra.nes", "title": "Супер Контра" }
+//     ]
+//   }
+//
+// В сборник входят ROMы с ЛЮБЫМИ мапперами (ядро FCEUmm определяет сам),
+// размер и количество ограничены только разумным размером APK.
+//
+// Обычная запись (одиночная игра) выглядит так:
+//
 //   {
 //     "robocop3.nes": {
 //       "flavor": "robocop3", "title": "RoboCop 3",
@@ -47,14 +65,52 @@ plugins {
 val romsDir = rootProject.file("roms")
 val gamesJsonFile = romsDir.resolve("games.json")
 
+data class CollectionGame(val file: File, val title: String)
+
 data class GameSpec(
     val fileName: String,
-    val file: File?,
+    val file: File?,                      // одиночный ROM (null у сборника)
     val flavor: String,
     val title: String,
     val versionCode: Int,
     val versionName: String,
+    val collection: List<CollectionGame>? // != null — flavor-сборник «X in 1»
 )
+
+// Массив "games" в записи games.json — сборник. Каждый элемент: {"file":
+// "имя.rom в roms/", "title": "Название в меню"} (title необязателен).
+// Минимум 2 игры: для одной есть обычный flavor. Ошибки — GradleException,
+// чтобы сборка упала сразу с понятным текстом, а не на старте приложения.
+private fun parseCollection(o: Map<*, *>, name: String): List<CollectionGame> {
+    val raw = o["games"] ?: return emptyList()
+    if (raw !is List<*>) {
+        throw GradleException("roms/games.json [$name]: games должен быть массивом [{\"file\": \"...\", \"title\": \"...\"}, ...]")
+    }
+    val romExts = setOf("nes", "unf", "unif", "fds")
+    val games = raw.mapIndexed { i, item ->
+        if (item !is Map<*, *>) {
+            throw GradleException("roms/games.json [$name]: games[$i] должен быть объектом {\"file\": \"...\", \"title\": \"...\"}")
+        }
+        val f = (item["file"] as? String)?.trim()
+        if (f.isNullOrEmpty()) {
+            throw GradleException("roms/games.json [$name]: games[$i] — не задан file (имя ROM-файла в roms/)")
+        }
+        val src = romsDir.resolve(f)
+        if (!src.exists()) {
+            throw GradleException("roms/games.json [$name]: games[$i] — ROM не найден: roms/$f")
+        }
+        if (src.extension.lowercase() !in romExts) {
+            throw GradleException("roms/games.json [$name]: games[$i] — ожидается ROM (.nes/.unf/.unif/.fds), получено: $f")
+        }
+        val t = (item["title"] as? String)?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: src.nameWithoutExtension
+        CollectionGame(src, t)
+    }
+    if (games.size < 2) {
+        throw GradleException("roms/games.json [$name]: в сборнике games должно быть минимум 2 игры (для одной соберите обычный flavor)")
+    }
+    return games
+}
 
 fun sanitizeFlavorName(raw: String): String {
     val cleaned = raw.lowercase().filter { it in 'a'..'z' || it in '0'..'9' }
@@ -120,9 +176,15 @@ val gameSpecs: List<GameSpec> = run {
         val flavorRaw = (o["flavor"] as? String) ?: File(name).nameWithoutExtension
         val title = (o["title"] as? String) ?: File(name).nameWithoutExtension
         val flavor = sanitizeFlavorName(flavorRaw)
+        val collection = parseCollection(o, name)
+        val romFile = romFiles.firstOrNull { it.name == name }
+        if (collection.isNotEmpty() && romFile != null) {
+            println("DendyBox: [$name] задан массив games — это сборник, отдельный ROM-файл с тем же именем игнорируется")
+        }
         GameSpec(
-            name, romFiles.firstOrNull { it.name == name }, flavor, title,
-            parseVersionCode(o, name), parseVersionName(o, name)
+            name, if (collection.isEmpty()) romFile else null, flavor, title,
+            parseVersionCode(o, name), parseVersionName(o, name),
+            if (collection.isEmpty()) null else collection
         )
     }
     val dup = specs.groupBy { it.flavor }.filterValues { it.size > 1 }.keys
@@ -315,8 +377,10 @@ android {
     }
 }
 
-// ================= Копирование выбранного ROM в assets варианта =================
-// «Одна игра — один картридж»: в каждый APK попадает ровно один ROM (rom.nes).
+// ================= Копирование ROM(ов) в assets варианта =================
+// «Одна игра — один картридж»: в каждый APK попадает ровно один ROM (rom.nes)
+// либо СБОРНИК: все ROMы списка games → assets/games/0.nes, 1.nes, …
+// + манифест assets/games/games.json (его читает CollectionMenu).
 // Опционально копируется и конфиг игры roms/<flavor>.json → assets/game.json
 // (сейчас — байт урона для вибро-отклика; см. roms/README.md).
 gameSpecs.forEach { spec ->
@@ -325,26 +389,55 @@ gameSpecs.forEach { spec ->
     val cfgSrc = romsDir.resolve("${spec.flavor}.json")
     tasks.register("prepare${cap}Rom") {
         group = "dendybox"
-        description = "Копирует roms/${spec.fileName} в assets варианта ${spec.flavor} (как rom.nes)"
-        val src = spec.file
-        if (src != null) inputs.file(src)
+        description = if (spec.collection != null) {
+            "Копирует ${spec.collection.size} ROM(ов) сборника в assets/games/ варианта ${spec.flavor}"
+        } else {
+            "Копирует roms/${spec.fileName} в assets варианта ${spec.flavor} (как rom.nes)"
+        }
+        if (spec.collection != null) {
+            spec.collection.forEach { inputs.file(it.file) }
+            outputs.dir(outDir.map { it.dir("games") })
+        } else {
+            val src = spec.file
+            if (src != null) inputs.file(src)
+            outputs.file(outDir.map { it.file("rom.nes") })
+        }
         if (cfgSrc.exists()) inputs.file(cfgSrc)
-        outputs.file(outDir.map { it.file("rom.nes") })
         if (cfgSrc.exists()) outputs.file(outDir.map { it.file("game.json") })
         doLast {
-            if (src == null || !src.exists()) {
-                throw GradleException(
-                    "ROM не найден: roms/${spec.fileName}\n" +
-                    "Положите файл в папку roms/ под именем ${spec.fileName}\n" +
-                    "(или поправьте roms/games.json) и повторите сборку."
-                )
-            }
             val dir = outDir.get().asFile
             dir.mkdirs()
-            copy {
-                from(src)
-                rename { "rom.nes" }
-                into(dir)
+            if (spec.collection != null) {
+                val gamesDir = dir.resolve("games")
+                gamesDir.mkdirs()
+                val esc: (String) -> String = { s ->
+                    s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "").replace("\t", " ")
+                }
+                val manifest = StringBuilder("{")
+                if (!spec.title.isNullOrBlank()) manifest.append("\"title\":\"${esc(spec.title)}\",")
+                manifest.append("\"games\":[")
+                spec.collection.forEachIndexed { i, g ->
+                    val dst = gamesDir.resolve("$i.${g.file.extension.lowercase()}")
+                    g.file.copyTo(dst, overwrite = true)
+                    if (i > 0) manifest.append(",")
+                    manifest.append("{\"file\":\"${dst.name}\",\"title\":\"${esc(g.title)}\"}")
+                }
+                manifest.append("]}")
+                dir.resolve("games/games.json").writeText(manifest.toString())
+            } else {
+                val src = spec.file
+                if (src == null || !src.exists()) {
+                    throw GradleException(
+                        "ROM не найден: roms/${spec.fileName}\n" +
+                        "Положите файл в папку roms/ под именем ${spec.fileName}\n" +
+                        "(или поправьте roms/games.json) и повторите сборку."
+                    )
+                }
+                copy {
+                    from(src)
+                    rename { "rom.nes" }
+                    into(dir)
+                }
             }
             if (cfgSrc.exists()) {
                 copy {
