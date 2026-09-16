@@ -1,51 +1,71 @@
 package com.dendybox.app.ui.screens
 
+import android.content.Context
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.Canvas
 import com.dendybox.app.settings.CollectionEntry
 
 /**
- * Меню сборника «X игр в 1» — стилизовано под экран выбора игры пиратских
- * мультикартов Денди: чёрный экран, двойная красно-жёлтая рамка, шахматные
- * полосы, моноширинный список «01. ИГРА».
+ * Меню сборника «X игр в 1» — страница выбора игры поверх постера сборника.
  *
- * Показывается вместо игрового экрана, пока игра не выбрана; тап по строке
- * запускает игру (onPick), «Выход» закрывает приложение.
+ * Фон: metadata/<flavor>/background.png|jpg|webp копируется сборкой в
+ * assets/games/background.* (имя файла приходит в манифесте games.json) и
+ * рисуется на весь экран. Постера нет — остаётся чёрный фон, меню работает.
+ *
+ * Поверх постера: шапка («N ИГР В 1» + название), тонкая линия, компактные
+ * «плашки» игр по центру (тёмное затенение под надписями — читабельно на
+ * любом арте), снова линия, внизу подсказка и «Выход».
  */
 
-// Палитра в духе NES: красный, жёлтый, белый, серый
-private val NesRed = Color(0xFFD82800)
-private val NesDarkRed = Color(0xFFA81000)
 private val NesYellow = Color(0xFFF8B800)
-private val NesWhite = Color(0xFFFCFCFC)
-private val NesGray = Color(0xFF9A9A9A)
 
 /** «2 ИГРЫ В 1», «5 ИГР В 1», «1 ИГРА В 1» — с правильным склонением. */
 private fun gamesInOne(n: Int): String {
@@ -62,87 +82,133 @@ private fun gamesInOne(n: Int): String {
 @Composable
 fun CollectionMenu(
     collectionTitle: String?,
+    background: String?, // assets-путь постера (null/битый — чёрный фон)
     games: List<CollectionEntry>,
     onPick: (Int) -> Unit,
     onExit: () -> Unit
 ) {
+    val context = LocalContext.current
+    var poster by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(background) {
+        poster = background?.let { decodePoster(context, it) }
+    }
+
+    val density = LocalDensity.current
+    // «Затенение» текста — мягкая тень, чтобы надписи не терялись на пёстром арте
+    val shadowStyle = TextStyle(
+        shadow = Shadow(
+            color = Color.Black.copy(alpha = 0.85f),
+            offset = Offset(0f, with(density) { 1.5.dp.toPx() }),
+            blurRadius = with(density) { 6.dp.toPx() }
+        )
+    )
+    // Плашки игр — ширина по содержимому, но длинные названия должны
+    // обрезаться: ширина экрана минус горизонтальные поля Column
+    val itemMaxWidth = LocalConfiguration.current.screenWidthDp.dp - 48.dp
+
     Box(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
     ) {
+        poster?.let { bmp ->
+            Image(
+                bitmap = bmp,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            // Мягкое затемнение верха и низа: шапка и подсказка читаются,
+            // центр постера остаётся открытым
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Black.copy(alpha = 0.65f),
+                            0.20f to Color.Black.copy(alpha = 0.05f),
+                            0.62f to Color.Black.copy(alpha = 0.05f),
+                            1f to Color.Black.copy(alpha = 0.75f)
+                        )
+                    )
+            )
+        }
+
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            CheckerStripe()
-            // Двойная рамка: внешняя красная, внутренняя тёмно-красная — как на
-            // пиратских мультикартах
-            Box(
+            // ---- Шапка: «N ИГР В 1» + название сборника ----
+            if (collectionTitle.isNullOrBlank()) {
+                Text(
+                    text = gamesInOne(games.size),
+                    color = NesYellow,
+                    style = shadowStyle,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 26.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1
+                )
+            } else {
+                Text(
+                    text = gamesInOne(games.size),
+                    color = NesYellow,
+                    style = shadowStyle,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    letterSpacing = 3.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1
+                )
+                Text(
+                    text = collectionTitle,
+                    color = Color.White,
+                    style = shadowStyle,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 23.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            }
+
+            ThinDivider(Modifier.padding(top = 12.dp, bottom = 6.dp))
+
+            // ---- Список игр: компактные плашки по центру ----
+            LazyColumn(
                 Modifier
                     .fillMaxWidth()
-                    .weight(1f)
-                    .padding(vertical = 6.dp)
-                    .border(3.dp, NesRed, RoundedCornerShape(6.dp))
-                    .padding(3.dp)
-                    .border(1.dp, NesDarkRed, RoundedCornerShape(4.dp))
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                contentPadding = PaddingValues(vertical = 10.dp)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = gamesInOne(games.size),
-                        color = NesYellow,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 26.sp,
-                        letterSpacing = 1.sp,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        modifier = Modifier.padding(top = 6.dp)
+                itemsIndexed(games) { _, game ->
+                    GamePill(
+                        game = game,
+                        maxWidth = itemMaxWidth,
+                        shadowStyle = shadowStyle,
+                        onClick = { onPick(game.index) }
                     )
-                    if (!collectionTitle.isNullOrBlank()) {
-                        Text(
-                            text = collectionTitle,
-                            color = NesWhite,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
-                        )
-                    } else {
-                        Box(Modifier.height(6.dp))
-                    }
-
-                    // Список игр; у коротких списков строки занимают больше
-                    // места (weight), у длинных — включается прокрутка
-                    LazyColumn(
-                        Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        itemsIndexed(games) { _, game ->
-                            GameRow(game = game, onClick = { onPick(game.index) })
-                        }
-                    }
                 }
             }
-            CheckerStripe()
 
+            ThinDivider(Modifier.padding(top = 6.dp, bottom = 10.dp))
+
+            // ---- Подсказка / выход ----
             Text(
                 text = "Нажмите на игру, чтобы начать",
-                color = NesGray,
+                color = Color.White.copy(alpha = 0.75f),
+                style = shadowStyle,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp)
+                fontSize = 11.sp,
+                textAlign = TextAlign.Center
             )
             TextButton(
                 onClick = onExit,
@@ -150,7 +216,7 @@ fun CollectionMenu(
             ) {
                 Text(
                     "Выход",
-                    color = NesGray,
+                    color = Color.White.copy(alpha = 0.6f),
                     fontFamily = FontFamily.Monospace,
                     fontSize = 13.sp
                 )
@@ -159,56 +225,88 @@ fun CollectionMenu(
     }
 }
 
+/** Плашка игры: ширина по содержимому, тёмное затенение, подсветка при нажатии. */
 @Composable
-private fun GameRow(game: CollectionEntry, onClick: () -> Unit) {
+private fun GamePill(
+    game: CollectionEntry,
+    maxWidth: Dp,
+    shadowStyle: TextStyle,
+    onClick: () -> Unit
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
     Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .background(NesDarkRed.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .widthIn(max = maxWidth)
+            .background(
+                if (pressed) Color.Black.copy(alpha = 0.78f) else Color.Black.copy(alpha = 0.55f),
+                RoundedCornerShape(10.dp)
+            )
+            .border(
+                1.dp,
+                if (pressed) NesYellow else Color.Transparent,
+                RoundedCornerShape(10.dp)
+            )
+            .clickable(
+                interactionSource = interaction,
+                indication = LocalIndication.current,
+                onClick = onClick
+            )
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = "%02d.".format(game.index + 1),
             color = NesYellow,
+            style = shadowStyle,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
-            fontSize = 16.sp
+            fontSize = 15.sp
         )
         Text(
             text = game.title,
-            color = NesWhite,
+            color = Color.White,
+            style = shadowStyle,
             fontFamily = FontFamily.Monospace,
-            fontSize = 16.sp,
+            fontSize = 15.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .padding(start = 10.dp)
-                .weight(1f)
-        )
-        // «курсор» справа — намёк, что строка нажимается
-        Text(
-            text = "\u25B6",
-            color = NesYellow,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 14.sp
+            modifier = Modifier.padding(start = 9.dp)
         )
     }
 }
 
-/** Декоративная шахматная полоса (красные/жёлтые квадраты) — «шапка» мультикарта. */
+/** Тонкая разделительная линия секций, растворяющаяся по краям. */
 @Composable
-private fun CheckerStripe() {
-    Canvas(Modifier.fillMaxWidth().height(8.dp)) {
-        val cells = 32
-        val cellW = size.width / cells
-        for (i in 0 until cells) {
-            drawRect(
-                color = if (i % 2 == 0) NesRed else NesYellow,
-                topLeft = Offset(i * cellW, 0f),
-                size = Size(cellW, size.height)
+private fun ThinDivider(modifier: Modifier = Modifier) {
+    Canvas(
+        modifier
+            .fillMaxWidth()
+            .height(1.dp)
+    ) {
+        drawRect(
+            brush = Brush.horizontalGradient(
+                0f to Color.Transparent,
+                0.18f to Color.White.copy(alpha = 0.32f),
+                0.82f to Color.White.copy(alpha = 0.32f),
+                1f to Color.Transparent
             )
-        }
+        )
     }
+}
+
+/** Постер из assets с даунсэмплом до размера экрана (экономия памяти). */
+private fun decodePoster(context: Context, assetPath: String): ImageBitmap? = try {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    context.assets.open(assetPath).use { BitmapFactory.decodeStream(it, null, bounds) }
+    val dm = context.resources.displayMetrics
+    var sample = 1
+    while (bounds.outWidth / (sample * 2) >= dm.widthPixels &&
+        bounds.outHeight / (sample * 2) >= dm.heightPixels
+    ) sample *= 2
+    val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+    context.assets.open(assetPath).use { BitmapFactory.decodeStream(it, null, opts) }
+        ?.asImageBitmap()
+} catch (_: Exception) {
+    null // файла нет / битый — остаётся чёрный фон
 }

@@ -7,7 +7,11 @@ import org.json.JSONObject
 data class CollectionEntry(val index: Int, val title: String, val assetPath: String)
 
 /** Сборник «X игр в 1» либо null (обычная игра — один ROM assets/rom.nes). */
-data class CollectionData(val title: String?, val games: List<CollectionEntry>)
+data class CollectionData(
+    val title: String?,
+    val background: String?, // assets-путь постера меню («games/background.png»), null — нет
+    val games: List<CollectionEntry>
+)
 
 /**
  * Сборник игр («X in 1»): в APK лежат assets/games/0.nes, 1.nes, …
@@ -15,12 +19,14 @@ data class CollectionData(val title: String?, val games: List<CollectionEntry>)
  *
  * ```json
  * { "title": "Контра: Сборник",
+ *   "background": "background.png",
  *   "games": [ {"file": "0.nes", "title": "Контра"},
  *              {"file": "1.nes", "title": "Супер Контра"} ] }
  * ```
  *
- * Манифест и ромы копирует сборкой задача prepare<Flavor>Rom, когда у flavor'а
- * в roms/games.json задан массив "games" (см. app/build.gradle.kts).
+ * Манифест, ромы и фон-постер (metadata/<flavor>/background.*) копирует
+ * сборкой задача prepare<Flavor>Rom, когда у flavor'а в roms/games.json
+ * задан массив "games" (см. app/build.gradle.kts).
  *
  * Особенности сборника в приложении:
  *  * до выбора игры движок не запускается — сначала меню CollectionMenu;
@@ -58,8 +64,14 @@ object CollectionCatalog {
                 }
             }
             if (games.isEmpty()) null else {
+                // Фон-постер меню: имя файла из манифеста, та же защита от
+                // выхода за пределы папки сборника, что и у ромов
+                val background = root.optString("background").takeUnless { it.isBlank() }
+                    ?.takeIf { bg -> !bg.contains('/') && !bg.contains('\\') && !bg.contains("..") }
+                    ?.let { "games/$it" }
                 CollectionData(
                     title = root.optString("title").takeUnless { it.isBlank() },
+                    background = background,
                     games = games
                 )
             }

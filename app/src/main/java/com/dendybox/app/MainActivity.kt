@@ -221,6 +221,7 @@ private fun AppRoot() {
     if (collection != null && selectedGame < 0) {
         CollectionMenu(
             collectionTitle = collection.title,
+            background = collection.background,
             games = collection.games,
             onPick = { idx ->
                 romMissing = false

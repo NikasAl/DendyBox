@@ -43,6 +43,11 @@ plugins {
 // В сборник входят ROMы с ЛЮБЫМИ мапперами (ядро FCEUmm определяет сам),
 // размер и количество ограничены только разумным размером APK.
 //
+// Фон меню сборника (постер): metadata/<flavor>/background.png|jpg|webp —
+// кладёте вы, сборка копирует его в assets/games/background.* и пишет имя
+// файла в манифест games.json (поле "background"); CollectionMenu рисует
+// постер на весь экран за списком игр. Файл опционален: нет — чёрный фон.
+//
 // Обычная запись (одиночная игра) выглядит так:
 //
 //   {
@@ -377,6 +382,13 @@ android {
     }
 }
 
+// Фон меню сборника: первый найденный metadata/<flavor>/background.*
+// (приоритет png → jpg → jpeg → webp; расширение сохраняется при копировании).
+private fun backgroundSource(flavor: String): File? =
+    listOf("png", "jpg", "jpeg", "webp")
+        .map { rootProject.file("metadata/$flavor/background.$it") }
+        .firstOrNull { it.exists() }
+
 // ================= Копирование ROM(ов) в assets варианта =================
 // «Одна игра — один картридж»: в каждый APK попадает ровно один ROM (rom.nes)
 // либо СБОРНИК: все ROMы списка games → assets/games/0.nes, 1.nes, …
@@ -387,6 +399,7 @@ gameSpecs.forEach { spec ->
     val cap = spec.flavor.replaceFirstChar { it.uppercaseChar() }
     val outDir = layout.buildDirectory.dir("generated/rom/${spec.flavor}")
     val cfgSrc = romsDir.resolve("${spec.flavor}.json")
+    val bgSrc = backgroundSource(spec.flavor)
     tasks.register("prepare${cap}Rom") {
         group = "dendybox"
         description = if (spec.collection != null) {
@@ -396,11 +409,21 @@ gameSpecs.forEach { spec ->
         }
         if (spec.collection != null) {
             spec.collection.forEach { inputs.file(it.file) }
+            if (bgSrc != null) {
+                inputs.file(bgSrc)
+                outputs.file(outDir.map { it.file("games/background.${bgSrc.extension.lowercase()}") })
+            }
             outputs.dir(outDir.map { it.dir("games") })
         } else {
             val src = spec.file
             if (src != null) inputs.file(src)
             outputs.file(outDir.map { it.file("rom.nes") })
+            if (bgSrc != null) {
+                println(
+                    "DendyBox: [${spec.flavor}] metadata/${spec.flavor}/background.* — " +
+                    "фон меню бывает только у сборников, файл игнорируется"
+                )
+            }
         }
         if (cfgSrc.exists()) inputs.file(cfgSrc)
         if (cfgSrc.exists()) outputs.file(outDir.map { it.file("game.json") })
@@ -410,11 +433,26 @@ gameSpecs.forEach { spec ->
             if (spec.collection != null) {
                 val gamesDir = dir.resolve("games")
                 gamesDir.mkdirs()
+                // Фон меню: убрать устаревший (удалили/сменили расширение)
+                // и скопировать текущий; имя файла уходит в манифест
+                gamesDir.listFiles { f -> f.name.startsWith("background.") }?.forEach { it.delete() }
+                val bgName = bgSrc?.let { "background.${it.extension.lowercase()}" }
+                if (bgSrc != null && bgName != null) {
+                    bgSrc.copyTo(gamesDir.resolve(bgName), overwrite = true)
+                    println(
+                        "DendyBox: [${spec.flavor}] фон меню сборника: metadata/${spec.flavor}/$bgName " +
+                        "(${bgSrc.length() / 1024} КиБ)"
+                    )
+                    if (bgSrc.length() > 12L * 1024 * 1024) {
+                        println("DendyBox: [${spec.flavor}] постер больше 12 МБ — проверьте размер APK")
+                    }
+                }
                 val esc: (String) -> String = { s ->
                     s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "").replace("\t", " ")
                 }
                 val manifest = StringBuilder("{")
                 if (!spec.title.isNullOrBlank()) manifest.append("\"title\":\"${esc(spec.title)}\",")
+                if (bgName != null) manifest.append("\"background\":\"$bgName\",")
                 manifest.append("\"games\":[")
                 spec.collection.forEachIndexed { i, g ->
                     val dst = gamesDir.resolve("$i.${g.file.extension.lowercase()}")
