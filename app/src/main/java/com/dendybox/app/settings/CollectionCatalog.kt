@@ -9,7 +9,8 @@ data class CollectionEntry(val index: Int, val title: String, val assetPath: Str
 /** Сборник «X игр в 1» либо null (обычная игра — один ROM assets/rom.nes). */
 data class CollectionData(
     val title: String?,
-    val background: String?, // assets-путь постера меню («games/background.png»), null — нет
+    val background: String?, // assets-путь постера меню («games/background.webp»), null — нет
+    val menuAlign: String,   // выравнивание блоков меню: left | center | right
     val games: List<CollectionEntry>
 )
 
@@ -19,14 +20,15 @@ data class CollectionData(
  *
  * ```json
  * { "title": "Контра: Сборник",
- *   "background": "background.png",
+ *   "background": "background.webp",
+ *   "menuAlign": "left",
  *   "games": [ {"file": "0.nes", "title": "Контра"},
  *              {"file": "1.nes", "title": "Супер Контра"} ] }
  * ```
  *
- * Манифест, ромы и фон-постер (metadata/<flavor>/background.*) копирует
- * сборкой задача prepare<Flavor>Rom, когда у flavor'а в roms/games.json
- * задан массив "games" (см. app/build.gradle.kts).
+ * Манифест, ромы и фон-постер (metadata/<flavor>/background.*, автоматически
+ * пережимается в WebP) копирует сборкой задача prepare<Flavor>Rom, когда у
+ * flavor'а в roms/games.json задан массив "games" (см. app/build.gradle.kts).
  *
  * Особенности сборника в приложении:
  *  * до выбора игры движок не запускается — сначала меню CollectionMenu;
@@ -69,9 +71,14 @@ object CollectionCatalog {
                 val background = root.optString("background").takeUnless { it.isBlank() }
                     ?.takeIf { bg -> !bg.contains('/') && !bg.contains('\\') && !bg.contains("..") }
                     ?.let { "games/$it" }
+                // Выравнивание блоков меню под постер (задаётся в games.json,
+                // в манифест попадает только не-center — см. build.gradle.kts)
+                val align = root.optString("menuAlign").takeUnless { it.isBlank() }
+                    ?.takeIf { it == "left" || it == "right" || it == "center" } ?: "center"
                 CollectionData(
                     title = root.optString("title").takeUnless { it.isBlank() },
                     background = background,
+                    menuAlign = align,
                     games = games
                 )
             }

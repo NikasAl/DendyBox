@@ -56,16 +56,33 @@ import com.dendybox.app.settings.CollectionEntry
 /**
  * Меню сборника «X игр в 1» — страница выбора игры поверх постера сборника.
  *
- * Фон: metadata/<flavor>/background.png|jpg|webp копируется сборкой в
- * assets/games/background.* (имя файла приходит в манифесте games.json) и
- * рисуется на весь экран. Постера нет — остаётся чёрный фон, меню работает.
+ * Фон: metadata/<flavor>/background.png|jpg|webp пережимается сборкой в
+ * assets/games/background.webp (имя файла приходит в манифесте games.json)
+ * и рисуется на весь экран. Постера нет — остаётся чёрный фон.
  *
  * Поверх постера: шапка («N ИГР В 1» + название), тонкая линия, компактные
- * «плашки» игр по центру (тёмное затенение под надписями — читабельно на
- * любом арте), снова линия, внизу подсказка и «Выход».
+ * «плашки» игр (тёмное затенение под надписями — читабельно на любом арте),
+ * снова линия, внизу подсказка и «Выход».
+ *
+ * Выравнивание всех блоков по горизонтали — menuAlign из манифеста
+ * (left/center/right; в games.json сборника, по умолчанию center): под
+ * постер, у которого композиция смещена к краю.
  */
 
 private val NesYellow = Color(0xFFF8B800)
+
+/** Строковое выравнивание из манифеста → горизонтальное выравнивание Compose. */
+private fun hAlign(menuAlign: String?): Alignment.Horizontal = when (menuAlign) {
+    "left" -> Alignment.Start
+    "right" -> Alignment.End
+    else -> Alignment.CenterHorizontally
+}
+
+private fun tAlign(h: Alignment.Horizontal): TextAlign = when (h) {
+    Alignment.Start -> TextAlign.Start
+    Alignment.End -> TextAlign.End
+    else -> TextAlign.Center
+}
 
 /** «2 ИГРЫ В 1», «5 ИГР В 1», «1 ИГРА В 1» — с правильным склонением. */
 private fun gamesInOne(n: Int): String {
@@ -83,6 +100,7 @@ private fun gamesInOne(n: Int): String {
 fun CollectionMenu(
     collectionTitle: String?,
     background: String?, // assets-путь постера (null/битый — чёрный фон)
+    menuAlign: String?,  // left | center | right (из манифеста сборника)
     games: List<CollectionEntry>,
     onPick: (Int) -> Unit,
     onExit: () -> Unit
@@ -105,6 +123,8 @@ fun CollectionMenu(
     // Плашки игр — ширина по содержимому, но длинные названия должны
     // обрезаться: ширина экрана минус горизонтальные поля Column
     val itemMaxWidth = LocalConfiguration.current.screenWidthDp.dp - 48.dp
+    val h = hAlign(menuAlign)
+    val t = tAlign(h)
 
     Box(
         Modifier
@@ -138,7 +158,7 @@ fun CollectionMenu(
             Modifier
                 .fillMaxSize()
                 .padding(horizontal = 24.dp, vertical = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            horizontalAlignment = h
         ) {
             // ---- Шапка: «N ИГР В 1» + название сборника ----
             if (collectionTitle.isNullOrBlank()) {
@@ -149,7 +169,7 @@ fun CollectionMenu(
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     fontSize = 26.sp,
-                    textAlign = TextAlign.Center,
+                    textAlign = t,
                     maxLines = 1
                 )
             } else {
@@ -161,7 +181,7 @@ fun CollectionMenu(
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp,
                     letterSpacing = 3.sp,
-                    textAlign = TextAlign.Center,
+                    textAlign = t,
                     maxLines = 1
                 )
                 Text(
@@ -171,7 +191,7 @@ fun CollectionMenu(
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     fontSize = 23.sp,
-                    textAlign = TextAlign.Center,
+                    textAlign = t,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 6.dp)
@@ -180,13 +200,13 @@ fun CollectionMenu(
 
             ThinDivider(Modifier.padding(top = 12.dp, bottom = 6.dp))
 
-            // ---- Список игр: компактные плашки по центру ----
+            // ---- Список игр: компактные плашки (выравнивание — как у всех блоков) ----
             LazyColumn(
                 Modifier
                     .fillMaxWidth()
                     .weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                horizontalAlignment = h,
                 contentPadding = PaddingValues(vertical = 10.dp)
             ) {
                 itemsIndexed(games) { _, game ->
@@ -208,11 +228,11 @@ fun CollectionMenu(
                 style = shadowStyle,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 11.sp,
-                textAlign = TextAlign.Center
+                textAlign = t
             )
             TextButton(
                 onClick = onExit,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
+                modifier = Modifier.align(h)
             ) {
                 Text(
                     "Выход",

@@ -17,6 +17,7 @@
   "contra3in1.nes": {
     "flavor": "contra3in1",
     "title": "Контра: 3 в 1",
+    "menuAlign": "left",
     "games": [
       { "file": "c_contra.nes",       "title": "Контра" },
       { "file": "c_super_contra.nes", "title": "Супер Контра" },

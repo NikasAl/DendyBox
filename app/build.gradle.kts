@@ -34,6 +34,7 @@ plugins {
 //
 //   "kontra8in1.nes": {
 //     "flavor": "kontra8in1", "title": "Контра: Сборник",
+//     "menuAlign": "left",   // выравнивание меню: left|center|right (по умолчанию center)
 //     "games": [
 //       { "file": "25_Contra.nes",       "title": "Контра" },
 //       { "file": "24_Super_Contra.nes", "title": "Супер Контра" }
@@ -44,9 +45,11 @@ plugins {
 // размер и количество ограничены только разумным размером APK.
 //
 // Фон меню сборника (постер): metadata/<flavor>/background.png|jpg|webp —
-// кладёте вы, сборка копирует его в assets/games/background.* и пишет имя
-// файла в манифест games.json (поле "background"); CollectionMenu рисует
-// постер на весь экран за списком игр. Файл опционален: нет — чёрный фон.
+// кладёте вы, сборка пережимает его в WebP (scripts/optimize_background.py,
+// длинная сторона ≤ 2048px; компактные <256 КиБ — без перекодирования) и
+// кладёт в assets/games/background.*, а имя файла пишет в манифест
+// games.json (поле "background"); CollectionMenu рисует постер на весь
+// экран за списком игр. Файл опционален: нет — чёрный фон.
 //
 // Обычная запись (одиночная игра) выглядит так:
 //
@@ -79,7 +82,8 @@ data class GameSpec(
     val title: String,
     val versionCode: Int,
     val versionName: String,
-    val collection: List<CollectionGame>? // != null — flavor-сборник «X in 1»
+    val collection: List<CollectionGame>?, // != null — flavor-сборник «X in 1»
+    val menuAlign: String                  // выравнивание меню сборника: left|center|right
 )
 
 // Массив "games" в записи games.json — сборник. Каждый элемент: {"file":
@@ -115,6 +119,20 @@ private fun parseCollection(o: Map<*, *>, name: String): List<CollectionGame> {
         throw GradleException("roms/games.json [$name]: в сборнике games должно быть минимум 2 игры (для одной соберите обычный flavor)")
     }
     return games
+}
+
+// Выравнивание меню сборника по горизонтали (menuAlign): left/center/right.
+// По умолчанию center. Ошибки — GradleException, чтобы упасть сразу в сборке.
+private val MENU_ALIGNS = setOf("left", "center", "right")
+
+private fun parseMenuAlign(o: Map<*, *>, name: String): String {
+    val raw = o["menuAlign"] ?: return "center"
+    if (raw !is String || raw !in MENU_ALIGNS) {
+        throw GradleException(
+            "roms/games.json [$name]: menuAlign должен быть одним из left/center/right, получено: $raw"
+        )
+    }
+    return raw
 }
 
 fun sanitizeFlavorName(raw: String): String {
@@ -189,7 +207,8 @@ val gameSpecs: List<GameSpec> = run {
         GameSpec(
             name, if (collection.isEmpty()) romFile else null, flavor, title,
             parseVersionCode(o, name), parseVersionName(o, name),
-            if (collection.isEmpty()) null else collection
+            if (collection.isEmpty()) null else collection,
+            parseMenuAlign(o, name)
         )
     }
     val dup = specs.groupBy { it.flavor }.filterValues { it.size > 1 }.keys
@@ -208,6 +227,14 @@ if (gameSpecs.isNotEmpty()) {
     println(
         "DendyBox: версии — " + gameSpecs.joinToString(", ") {
             "${it.flavor} ${it.versionName} (${it.versionCode})"
+        }
+    )
+    // Сводка по иконкам — ровно один раз: AGP выполняет тело onVariants дважды,
+    // поэтому сообщения об иконках там дублировались (проверено на AGP 8.7.3)
+    println(
+        "DendyBox: иконки — " + gameSpecs.joinToString(", ") { spec ->
+            val has = rootProject.file("metadata/${spec.flavor}/icon.png").exists()
+            "${spec.flavor}: " + if (has) "своя" else "стандартная"
         }
     )
 }
@@ -383,11 +410,38 @@ android {
 }
 
 // Фон меню сборника: первый найденный metadata/<flavor>/background.*
-// (приоритет png → jpg → jpeg → webp; расширение сохраняется при копировании).
+// (приоритет png → jpg → jpeg → webp; формат исходника любой — в APK
+// уйдёт пережатый WebP/JPEG, см. optimizeBackground ниже).
 private fun backgroundSource(flavor: String): File? =
     listOf("png", "jpg", "jpeg", "webp")
         .map { rootProject.file("metadata/$flavor/background.$it") }
         .firstOrNull { it.exists() }
+
+private val bgOptimizerScript = rootProject.file("scripts/optimize_background.py")
+
+// Оптимизация постера меню: python3 + Pillow (те же зависимости, что у
+// make_icons.py) → WebP (или JPEG), длинная сторона ≤ 2048px. Скрипт
+// печатает строку "RESULT <файл>" с именем результата; она же попадает в
+// манифест games.json. Возвращает имя итогового файла в gamesDir либо null
+// (python нет/упал) — тогда вызывающий вставит исходник как есть.
+private fun optimizeBackground(src: File, gamesDir: File): String? {
+    return try {
+        val pb = ProcessBuilder(
+            "python3", bgOptimizerScript.absolutePath,
+            src.absolutePath, File(gamesDir, "background").absolutePath
+        )
+        pb.redirectErrorStream(true)
+        val proc = pb.start()
+        var result: String? = null
+        proc.inputStream.bufferedReader().forEachLine { line ->
+            println("DendyBox: [постер] $line")
+            if (line.startsWith("RESULT ")) result = line.removePrefix("RESULT ").trim()
+        }
+        if (proc.waitFor() == 0) result?.substringAfterLast('/') else null
+    } catch (_: Exception) {
+        null // python3 не найден и т.п. — вызывающий сделает fallback
+    }
+}
 
 // ================= Копирование ROM(ов) в assets варианта =================
 // «Одна игра — один картридж»: в каждый APK попадает ровно один ROM (rom.nes)
@@ -411,7 +465,6 @@ gameSpecs.forEach { spec ->
             spec.collection.forEach { inputs.file(it.file) }
             if (bgSrc != null) {
                 inputs.file(bgSrc)
-                outputs.file(outDir.map { it.file("games/background.${bgSrc.extension.lowercase()}") })
             }
             outputs.dir(outDir.map { it.dir("games") })
         } else {
@@ -433,17 +486,27 @@ gameSpecs.forEach { spec ->
             if (spec.collection != null) {
                 val gamesDir = dir.resolve("games")
                 gamesDir.mkdirs()
-                // Фон меню: убрать устаревший (удалили/сменили расширение)
-                // и скопировать текущий; имя файла уходит в манифест
+                // Фон меню: убрать устаревший (удалили/сменили формат/расширение),
+                // оптимизировать текущий; итоговое имя уходит в манифест
                 gamesDir.listFiles { f -> f.name.startsWith("background.") }?.forEach { it.delete() }
-                val bgName = bgSrc?.let { "background.${it.extension.lowercase()}" }
-                if (bgSrc != null && bgName != null) {
-                    bgSrc.copyTo(gamesDir.resolve(bgName), overwrite = true)
+                var bgName: String? = null
+                if (bgSrc != null) {
+                    bgName = optimizeBackground(bgSrc, gamesDir)
+                    if (bgName == null) {
+                        // python3/Pillow недоступны — вставляем исходник как есть
+                        bgName = "background.${bgSrc.extension.lowercase()}"
+                        bgSrc.copyTo(gamesDir.resolve(bgName), overwrite = true)
+                        println(
+                            "DendyBox: [${spec.flavor}] постер не удалось оптимизировать " +
+                            "(нужен python3 + Pillow) — вставлен как есть: $bgName"
+                        )
+                    }
+                    val dstSize = gamesDir.resolve(bgName).length() / 1024
                     println(
-                        "DendyBox: [${spec.flavor}] фон меню сборника: metadata/${spec.flavor}/$bgName " +
-                        "(${bgSrc.length() / 1024} КиБ)"
+                        "DendyBox: [${spec.flavor}] фон меню сборника: $bgName " +
+                        "($dstSize КиБ из ${bgSrc.length() / 1024} КиБ)"
                     )
-                    if (bgSrc.length() > 12L * 1024 * 1024) {
+                    if (gamesDir.resolve(bgName).length() > 12L * 1024 * 1024) {
                         println("DendyBox: [${spec.flavor}] постер больше 12 МБ — проверьте размер APK")
                     }
                 }
@@ -453,6 +516,7 @@ gameSpecs.forEach { spec ->
                 val manifest = StringBuilder("{")
                 if (!spec.title.isNullOrBlank()) manifest.append("\"title\":\"${esc(spec.title)}\",")
                 if (bgName != null) manifest.append("\"background\":\"$bgName\",")
+                if (spec.menuAlign != "center") manifest.append("\"menuAlign\":\"${spec.menuAlign}\",")
                 manifest.append("\"games\":[")
                 spec.collection.forEachIndexed { i, g ->
                     val dst = gamesDir.resolve("$i.${g.file.extension.lowercase()}")
@@ -504,7 +568,8 @@ androidComponents {
         val flavor = variant.flavorName ?: return@onVariants
         val iconSrc = rootProject.file("metadata/$flavor/icon.png")
         if (!iconSrc.exists()) {
-            println("DendyBox: metadata/$flavor/icon.png нет — собираем со стандартной иконкой DendyBox")
+            // Сообщение о стандартной иконке печатает сводка в начале конфигурации
+            // (здесь AGP выполняет тело дважды — сообщения дублировались)
             return@onVariants
         }
         val cap = variant.name.replaceFirstChar { it.uppercaseChar() }

@@ -222,6 +222,7 @@ private fun AppRoot() {
         CollectionMenu(
             collectionTitle = collection.title,
             background = collection.background,
+            menuAlign = collection.menuAlign,
             games = collection.games,
             onPick = { idx ->
                 romMissing = false
