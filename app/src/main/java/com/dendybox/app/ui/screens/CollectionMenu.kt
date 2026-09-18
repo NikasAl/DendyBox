@@ -6,6 +6,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -13,15 +15,14 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,7 +63,9 @@ import com.dendybox.app.settings.CollectionEntry
  *
  * Поверх постера: шапка («N ИГР В 1» + название), тонкая линия, компактные
  * «плашки» игр (тёмное затенение под надписями — читабельно на любом арте),
- * снова линия, внизу подсказка и «Выход».
+ * снова линия, внизу подсказка и «Выход». Секции стянуты в один блок по ширине
+ * самого широкого элемента (IntrinsicSize.Max): линии-разделители и всё
+ * содержимое имеют общую ширину, а не растягиваются на весь экран.
  *
  * Выравнивание всех блоков по горизонтали — menuAlign из манифеста
  * (left/center/right; в games.json сборника, по умолчанию center): под
@@ -160,86 +163,94 @@ fun CollectionMenu(
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             horizontalAlignment = h
         ) {
-            // ---- Шапка: «N ИГР В 1» + название сборника ----
-            if (collectionTitle.isNullOrBlank()) {
-                Text(
-                    text = gamesInOne(games.size),
-                    color = NesYellow,
-                    style = shadowStyle,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 26.sp,
-                    textAlign = t,
-                    maxLines = 1
-                )
-            } else {
-                Text(
-                    text = gamesInOne(games.size),
-                    color = NesYellow,
-                    style = shadowStyle,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    letterSpacing = 3.sp,
-                    textAlign = t,
-                    maxLines = 1
-                )
-                Text(
-                    text = collectionTitle,
-                    color = Color.White,
-                    style = shadowStyle,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 23.sp,
-                    textAlign = t,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 6.dp)
-                )
-            }
-
-            ThinDivider(Modifier.padding(top = 12.dp, bottom = 6.dp))
-
-            // ---- Список игр: компактные плашки (выравнивание — как у всех блоков) ----
-            LazyColumn(
-                Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                horizontalAlignment = h,
-                contentPadding = PaddingValues(vertical = 10.dp)
+            // ---- Содержимое, стянутое по ширине самого широкого блока ----
+            // Ширина = максимум из ширины шапки, плашек и футера (ограничено
+            // шириной экрана минус поля): разделители получаются ровно по блокам.
+            Column(
+                Modifier.width(IntrinsicSize.Max),
+                horizontalAlignment = h
             ) {
-                itemsIndexed(games) { _, game ->
-                    GamePill(
-                        game = game,
-                        maxWidth = itemMaxWidth,
-                        shadowStyle = shadowStyle,
-                        onClick = { onPick(game.index) }
+                // ---- Шапка: «N ИГР В 1» + название сборника ----
+                if (collectionTitle.isNullOrBlank()) {
+                    Text(
+                        text = gamesInOne(games.size),
+                        color = NesYellow,
+                        style = shadowStyle,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 26.sp,
+                        textAlign = t,
+                        maxLines = 1
+                    )
+                } else {
+                    Text(
+                        text = gamesInOne(games.size),
+                        color = NesYellow,
+                        style = shadowStyle,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        letterSpacing = 3.sp,
+                        textAlign = t,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = collectionTitle,
+                        color = Color.White,
+                        style = shadowStyle,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 23.sp,
+                        textAlign = t,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 6.dp)
                     )
                 }
-            }
 
-            ThinDivider(Modifier.padding(top = 6.dp, bottom = 10.dp))
+                ThinDivider(Modifier.padding(top = 12.dp, bottom = 6.dp))
 
-            // ---- Подсказка / выход ----
-            Text(
-                text = "Нажмите на игру, чтобы начать",
-                color = Color.White.copy(alpha = 0.75f),
-                style = shadowStyle,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-                textAlign = t
-            )
-            TextButton(
-                onClick = onExit,
-                modifier = Modifier.align(h)
-            ) {
+                // ---- Список игр: компактные плашки (выравнивание — как у всех блоков) ----
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalAlignment = h
+                ) {
+                    games.forEach { game ->
+                        GamePill(
+                            game = game,
+                            maxWidth = itemMaxWidth,
+                            shadowStyle = shadowStyle,
+                            onClick = { onPick(game.index) }
+                        )
+                    }
+                }
+
+                ThinDivider(Modifier.padding(top = 6.dp, bottom = 10.dp))
+
+                // ---- Подсказка / выход ----
                 Text(
-                    "Выход",
-                    color = Color.White.copy(alpha = 0.6f),
+                    text = "Нажмите на игру, чтобы начать",
+                    color = Color.White.copy(alpha = 0.75f),
+                    style = shadowStyle,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp
+                    fontSize = 11.sp,
+                    textAlign = t
                 )
+                TextButton(
+                    onClick = onExit,
+                    modifier = Modifier.align(h)
+                ) {
+                    Text(
+                        "Выход",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp
+                    )
+                }
             }
         }
     }
@@ -296,7 +307,7 @@ private fun GamePill(
     }
 }
 
-/** Тонкая разделительная линия секций, растворяющаяся по краям. */
+/** Тонкая линия между секциями: во всю ширину блока контента, растворяется по краям. */
 @Composable
 private fun ThinDivider(modifier: Modifier = Modifier) {
     Canvas(
