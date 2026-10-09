@@ -1,0 +1,18 @@
+{
+  "keyId": "1275328",
+  "privateKey": "~/.config/rustore/private_key.pem",
+
+  "defaults": {
+    "publishType": "MANUAL",
+    "categories": ["arcade"]
+  },
+
+  "packages": {
+    "contra3in1": "com.dendybox.app.contra3in1",
+    "robocop3": "com.dendybox.app.robocop3"
+  },
+
+  "overrides": {
+    "soccer": { "categories": ["sports"] }
+  }
+}

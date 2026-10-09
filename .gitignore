@@ -27,3 +27,7 @@ tools/multicart/test/*.nes
 tools/multicart/test/mc_harness
 tools/multicart/test/_*
 tools/multicart/asm6f/asm6f
+
+# RuStore: локальный конфиг загрузки (ключи не должны попадать в git)
+scripts/rustore/config.local.json
+__pycache__/
