@@ -13,10 +13,10 @@
 #
 # Как это работает:
 #   * ставится APK (как в screenshots.sh), игра запускается и сама
-#     разворачивается в альбомную ориентацию — скрипт дожидается её;
-#   * звук пишется со смартфона (звук игры) на Android 11+; на старых
-#     версиях запишется только видео;
-#   * звук дублируется на колонки ПК — сразу слышно, что запись идёт со звуком;
+#     разворачивается в альбомную ориентацию;
+#   * звук пишется со смартфона (звук игры) на Android 11+
+#   * после записи ffmpeg поднимает пиковую громкость аудио до -1 дБ,
+#     чтобы в видео был хороший уровень (обезвредить: NORMAUDIO=0);
 #   * запись идёт без окна на ПК; во время записи ИГРАЙТЕ на телефоне;
 #   * прервать можно Ctrl+C в любой момент — файл закроется корректно.
 #
@@ -84,44 +84,16 @@ if ! "$ADB" shell pm list packages 2>/dev/null | grep -q "package:$PKG"; then
   exit 1
 fi
 
-# --- запуск игры; ориентацию задаёт сама игра, ничего не переопределяем ---
+# --- запуск игры; ориентацию задаёт сама игра (sensorLandscape), ждём только загрузки ---
 echo "Запуск $PKG ..."
 "$ADB" shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || {
   "$ADB" shell am start -n "$PKG/com.dendybox.app.MainActivity"
 }
 
-# Текущая ориентация дисплея: 0/2 — портрет, 1/3 — альбомная, пусто — неизвестно
-current_rotation() {
-  local r="" line
-  r="$("$ADB" shell "dumpsys input 2>/dev/null | grep -m1 'SurfaceOrientation'" 2>/dev/null | grep -oE '[0-9]+' | tail -n1 | tr -d '\r')" || true
-  if [ -z "$r" ]; then
-    line="$("$ADB" shell "dumpsys window displays 2>/dev/null | grep -m1 -iE 'mCurrentRotation|mDisplayRotation'" 2>/dev/null | tr -d '\r')" || true
-    case "$line" in
-      *ROTATION_0*|*=0*)   r=0 ;;
-      *ROTATION_90*|*=1*)  r=1 ;;
-      *ROTATION_180*|*=2*) r=2 ;;
-      *ROTATION_270*|*=3*) r=3 ;;
-    esac
-  fi
-  printf '%s' "$r"
-}
-
-echo ""
-echo "Ожидаю альбомную ориентацию игры (sensorLandscape)..."
-ORIENT_OK=0
-for _ in $(seq 1 30); do
-  R="$(current_rotation)"
-  if [ "$R" = "1" ] || [ "$R" = "3" ]; then
-    ORIENT_OK=1
-    break
-  fi
-  sleep 0.5
-done
-if [ "$ORIENT_OK" = "1" ]; then
-  echo "Ориентация альбомная — пишем весь экран."
-else
-  echo "ПРЕДУПРЕЖДЕНИЕ: альбомная ориентация не определилась — пишу как есть."
-fi
+# Игра сама поворачивается в альбомную ориентацию (sensorLandscape);
+# детект через dumpsys на новых Android не работает — просто даём игре
+# пару секунд загрузиться и пишем экран как есть.
+sleep 2
 
 # --- файл результата ---
 OUT="$OUTFILE"
@@ -177,6 +149,28 @@ if [ "$RC" -ne 0 ] && [ "$RC" -ne 124 ] && [ "$RC" -ne 130 ]; then
 fi
 
 if [ -s "$OUT" ]; then
+  # --- доводим громкость записи до нормального уровня: пик → -1 дБ ---
+  if [ "${NORMAUDIO:-1}" = "1" ] && command -v ffmpeg >/dev/null 2>&1; then
+    MAXV="$(ffmpeg -hide_banner -i "$OUT" -map 0:a -af volumedetect -f null - 2>&1 \
+      | grep -oE 'max_volume: *[-0-9.]+ *dB' | grep -oE '[-0-9.]+' || true)"
+    if [ -n "$MAXV" ]; then
+      GAIN="$(awk -v m="$MAXV" 'BEGIN{g=-m-1; if(g>36)g=36; if(g<0)g=0; printf "%.1f", g}')"
+      if [ "$(awk -v g="$GAIN" 'BEGIN{print (g>0.5)?1:0}')" = "1" ]; then
+        echo "Громкость аудио в записи низкая (пик ${MAXV} дБ) — прибираю на +${GAIN} дБ ..."
+        TMP="${OUT}.norm.mp4"
+        if ffmpeg -hide_banner -loglevel error -y -i "$OUT" \
+            -af "volume=${GAIN}dB" -c:v copy -c:a aac -b:a 192k "$TMP"; then
+          mv "$TMP" "$OUT"
+        else
+          rm -f "$TMP"
+          echo "ПРЕДУПРЕЖДЕНИЕ: не удалось нормализовать громкость, оставил как есть."
+        fi
+      else
+        echo "Громкость аудио в норме (пик ${MAXV} дБ)."
+      fi
+    fi
+  fi
+
   echo ""
   echo "Готово: $OUT ($(du -h "$OUT" | cut -f1))"
   echo "Прервать можно было и Ctrl+C — файл закрывается корректно."
