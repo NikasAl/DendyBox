@@ -601,4 +601,6 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    // Юнит-тесты чистой логики ввода (FingerRouter — симуляция touch-событий)
+    testImplementation("junit:junit:4.13.2")
 }

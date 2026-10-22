@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -34,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -250,6 +252,33 @@ private fun GroupFrame(
 //  для локальной игры на двоих на одном экране.
 // ---------------------------------------------------------------------------
 
+/**
+ * Какая кнопка группы [gid] находится в точке ([x], [y]) px?
+ * Формулы позиций — ТЕ ЖЕ, что при отрисовке кнопок в [ControlsLayer]:
+ * центр группы (g.x/g.y в долях экрана) + офсет спецификации, размер
+ * с масштабом. null — точка вне кнопок группы.
+ * Позиция/масштаб читаются на момент события — редактирование раскладки
+ * без пересоздания обработчика не рассинхронизирует hit-test и рисунок.
+ */
+private fun hitTestButton(
+    gid: LayoutStore.GroupId,
+    g: LayoutStore.Group,
+    x: Float,
+    y: Float,
+    parentPx: IntSize,
+    density: Density
+): String? {
+    val cx = g.x * parentPx.width
+    val cy = g.y * parentPx.height
+    for (spec in specsOf(gid)) {
+        val s = spec.size * g.scale * density.density
+        val left = cx + spec.dx * g.scale * density.density - s / 2f
+        val top = cy + spec.dy * g.scale * density.density - s / 2f
+        if (x >= left && x < left + s && y >= top && y < top + s) return spec.id
+    }
+    return null
+}
+
 @Composable
 fun ControlsLayer(
     store: LayoutStore,
@@ -268,7 +297,82 @@ fun ControlsLayer(
         } else {
             listOf(LayoutStore.GroupId.AB, LayoutStore.GroupId.META)
         }
-        groups.forEach { gid ->
+
+        // Порт СВОЕЙ стороны читаем В МОМЕНТ СОБЫТИЯ (pointerInput-корутины
+        // живут дольше рекомпозиций; см. комментарий в GameScreen про netplay)
+        val currentPort by rememberUpdatedState(inputPort)
+
+        // Подсветка нажатых кнопок: одна карта на группу. Обновляется из
+        // pointerInput-корутины (маршрутизатором), читается в GameButton —
+        // рекомпозиция кнопки при нажатии/отжатии.
+        val pressedByGroup = remember {
+            groups.associateWith { mutableStateMapOf<String, Boolean>() }
+        }
+
+        // Касания обрабатываются НА УРОВНЕ ГРУППЫ, а не на каждой кнопке:
+        // палец может скользить между кнопками — при переезде из области A
+        // в область B кнопка A отжимается, B нажимается (см. FingerRouter).
+        // Раньше каждая кнопка ловила касания сама (detectTapGestures +
+        // awaitRelease) и «привязывала» палец до отпускания — быстрые серии
+        // «сначала A, потом B без отрыва пальца» были невозможны.
+        val touchMods = if (editing) Modifier else {
+            var m: Modifier = Modifier
+            groups.forEach { gid ->
+                m = m.then(
+                    Modifier.pointerInput(gid, parentPx) {
+                        val pressedState = pressedByGroup[gid]
+                            ?: return@pointerInput
+                        val router = FingerRouter(
+                            hitTest = { x, y ->
+                                hitTestButton(gid, store.group(gid), x, y, parentPx, density)
+                            },
+                            onPress = { id, down ->
+                                pressedState[id] = down
+                                handlePress(id, down, currentPort)
+                            }
+                        )
+                        try {
+                            awaitEachGesture {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    for (change in event.changes) {
+                                        val pid = change.id.value
+                                        // handled = палец под управлением ЭТОЙ группы —
+                                        // его события потребляем, чтобы не «протекали»
+                                        // ниже (верхняя панель, крестовина)
+                                        val handled = when {
+                                            // уже наш палец — переназначить кнопку по позиции
+                                            change.pressed && router.isTracked(pid) -> {
+                                                router.move(pid, change.position.x, change.position.y)
+                                                true
+                                            }
+                                            // новое касание — назначить, если попал в кнопку группы
+                                            change.pressed && change.changedToDown() ->
+                                                router.down(pid, change.position.x, change.position.y)
+                                            // отпускание/отмена — снять палец с кнопки
+                                            !change.pressed -> router.up(pid)
+                                            else -> false
+                                        }
+                                        if (handled) change.consume()
+                                    }
+                                    // Жест окончен, когда отпущены ВСЕ пальцы
+                                    if (event.changes.none { it.pressed }) break
+                                }
+                            }
+                        } finally {
+                            // Отмена корутины (уход с экрана, смена размера окна,
+                            // пересоздание слоя) — отжать всё, иначе кнопка
+                            // залипла бы навсегда
+                            router.releaseAll()
+                        }
+                    }
+                )
+            }
+            m
+        }
+
+        Box(Modifier.fillMaxSize().then(touchMods)) {
+            groups.forEach { gid ->
             val g = store.group(gid) // чтение state — рекомпозиция при изменении
             val cx = g.x * parentPx.width
             val cy = g.y * parentPx.height
@@ -313,13 +417,14 @@ fun ControlsLayer(
                         parentPx = parentPx,
                         density = density,
                         editing = editing,
-                        inputPort = inputPort,
                         onSelect = { onSelect(gid) },
-                        onPress = { down -> handlePress(spec.id, down, inputPort) }
+                        // Подсветку нажатия ставит маршрутизатор касаний группы
+                        pressed = pressedByGroup[gid]?.get(spec.id) == true
                     )
                 }
             }
-        }
+            } // groups.forEach
+        } // Box(touchMods)
     }
 }
 
@@ -334,20 +439,18 @@ private fun GameButton(
     parentPx: IntSize,
     density: Density,
     editing: Boolean,
-    inputPort: Int,
     onSelect: () -> Unit,
-    onPress: (Boolean) -> Unit
+    // Нажатие выставляет маршрутизатор касаний группы (ControlsLayer);
+    // в редакторе кнопки не «нажимаются» — параметр остаётся false
+    pressed: Boolean
 ) {
     val opacity by SettingsStore.controlsOpacity.collectAsState()
     // pointerInput-корутины живут дольше рекомпозиций — колбэки читаем через
     // rememberUpdatedState, иначе корутина держит лямбду первого состава
-    // (с устаревшим inputPort — например, до включения netplay)
-    val currentOnPress by rememberUpdatedState(onPress)
     val currentOnSelect by rememberUpdatedState(onSelect)
     val isTurbo = spec.id == "TA" || spec.id == "TB"
     val isPill = spec.id == "SELECT" || spec.id == "START"
     val shape = if (isPill) RoundedCornerShape(12.dp) else CircleShape
-    var pressed by remember { mutableStateOf(false) }
 
     val fillAlpha = when {
         pressed -> minOf(1f, opacity + 0.3f)
@@ -366,6 +469,9 @@ private fun GameButton(
                     // Всё состояние читаем ВНУТРИ колбэка на момент события:
                     // pointerInput не пересоздаётся при рекомпозиции, поэтому
                     // захваченные «на старте» значения устаревают.
+                    // В игровом режиме касаний НЕТ: их маршрутизирует группа
+                    // (FingerRouter в ControlsLayer) — палец может скользить
+                    // между кнопками, перебрасывая нажатие с одной на другую.
                     Modifier
                         .pointerInput(gid) {
                             detectTapGestures(onTap = { currentOnSelect() })
@@ -383,20 +489,7 @@ private fun GameButton(
                             )
                         }
                 } else {
-                    Modifier.pointerInput(spec.id) {
-                        detectTapGestures(
-                            onPress = {
-                                pressed = true
-                                currentOnPress(true)
-                                try {
-                                    awaitRelease()
-                                } finally {
-                                    pressed = false
-                                    currentOnPress(false)
-                                }
-                            }
-                        )
-                    }
+                    Modifier
                 }
             )
             .clip(shape)
