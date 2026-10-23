@@ -110,6 +110,9 @@ class MainActivity : ComponentActivity() {
 private fun AppRoot() {
     val context = LocalContext.current
     SettingsStore.init(context)
+    // Хранилище пользовательских комбо-кнопок (глобальное; пресеты игры —
+    // в GameConfig из roms/<flavor>.json)
+    com.dendybox.app.ui.controls.ComboStore.init(context)
     // Конфиг игры (roms/<flavor>.json → assets/game.json): байт урона для
     // вибрации при уроне и видимость сетевого режима. Файл опционален;
     // читается один раз, до старта движка

@@ -26,11 +26,13 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,15 +45,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.dendybox.app.cheats.CheatRepository
 import com.dendybox.app.emulator.EmulatorEngine
+import com.dendybox.app.input.ComboRunner
+import com.dendybox.app.input.GamepadInput
 import com.dendybox.app.input.InputState
 import com.dendybox.app.saves.SaveManager
 import com.dendybox.app.settings.SettingsStore
+import com.dendybox.app.ui.controls.ComboStore
 import com.dendybox.app.ui.controls.ControlsLayer
 import com.dendybox.app.ui.controls.DpadLayer
 import com.dendybox.app.ui.controls.EditorSurface
 import com.dendybox.app.ui.controls.LayoutStore
 
-enum class Screen { GAME, PAUSE, SLOTS, CHEATS, SETTINGS, EDIT, NET }
+enum class Screen { GAME, PAUSE, SLOTS, CHEATS, COMBOS, SETTINGS, EDIT, NET }
 
 @Composable
 fun GameScreen(
@@ -166,6 +171,23 @@ fun GameScreen(
             )
             ControlsLayer(store = layoutStore, editing = false, inputPort = myPort())
 
+            // Исполнитель программируемых комбо-кнопок: нажатие комбо-кнопки
+            // (маршрутизация та же, что у A/B — GamepadInput) запускает
+            // проигрывание последовательности. Scope привязан к игровому
+            // режиму: пауза отменяет проигрывание, отмена ГАРАНТИРОВАННО
+            // отжимает нажатые биты (см. ComboRunner.play)
+            val comboScope = rememberCoroutineScope()
+            val comboRunner = remember { ComboRunner(comboScope) { ComboStore.effective() } }
+            DisposableEffect(Unit) {
+                GamepadInput.onComboPress = { id, down, port ->
+                    if (down) comboRunner.start(id, port)
+                }
+                onDispose {
+                    GamepadInput.onComboPress = null
+                    comboRunner.cancelAll()
+                }
+            }
+
             // Второй джойстик для локальной игры на двоих (по сети он не нужен —
             // второй игрок играет со своего телефона)
             if (twoLocal && !netLocked) {
@@ -263,6 +285,7 @@ fun GameScreen(
                 },
                 onSlots = { onScreen(Screen.SLOTS) },
                 onCheats = { onScreen(Screen.CHEATS) },
+                onCombos = { onScreen(Screen.COMBOS) },
                 onEdit = { onScreen(Screen.EDIT) },
                 onSettings = { onScreen(Screen.SETTINGS) },
                 onNet = {
@@ -325,6 +348,8 @@ fun GameScreen(
                     onBack = { onScreen(Screen.PAUSE) }
                 )
             }
+
+            Screen.COMBOS -> ComboPanel(onBack = { onScreen(Screen.PAUSE) })
 
             Screen.SETTINGS -> SettingsPanel(
                 onBack = { onScreen(Screen.PAUSE) },

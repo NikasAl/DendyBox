@@ -39,9 +39,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dendybox.app.input.GamepadInput
@@ -90,6 +92,7 @@ private fun specsOf(id: LayoutStore.GroupId): List<CtrlSpec> = when (id) {
     LayoutStore.GroupId.AB -> SPECS_AB
     LayoutStore.GroupId.AB2 -> SPECS_AB2
     LayoutStore.GroupId.META -> SPECS_META
+    LayoutStore.GroupId.COMBO -> comboSpecs(ComboStore.effective())
     LayoutStore.GroupId.DPAD, LayoutStore.GroupId.DPAD2 -> emptyList()
 }
 
@@ -112,12 +115,61 @@ fun extentsDp(id: LayoutStore.GroupId, dpadBaseRadiusDp: Float): Extents = when 
     LayoutStore.GroupId.AB2 ->
         Extents(left = 68f, top = 32f, right = 68f, bottom = 32f)
     LayoutStore.GroupId.META -> Extents(left = 52f, top = 23f, right = 52f, bottom = 23f)
+    LayoutStore.GroupId.COMBO -> {
+        // Блок комбо-кнопок: сетка по числу кнопок (см. [comboSpecs]);
+        // пустой блок — квадратик 48dp, чтобы рамку можно было тянуть в редакторе
+        val n = ComboStore.effective().size
+        if (n == 0) {
+            Extents(24f, 24f, 24f, 24f)
+        } else {
+            val cols = comboCols(n)
+            val rows = (n + cols - 1) / cols
+            val hw = (cols - 1) * COMBO_PITCH / 2f + COMBO_SIZE / 2f
+            val hh = (rows - 1) * COMBO_PITCH / 2f + COMBO_SIZE / 2f
+            Extents(hw, hh, hw, hh)
+        }
+    }
     LayoutStore.GroupId.DPAD, LayoutStore.GroupId.DPAD2 -> Extents(
         left = dpadBaseRadiusDp,
         top = dpadBaseRadiusDp,
         right = dpadBaseRadiusDp,
         bottom = dpadBaseRadiusDp
     )
+}
+
+// ---------------------------------------------------------------------------
+// Программируемые комбо-кнопки (наполнение — ComboStore: пресеты игры +
+// пользовательские). Блок рисуется/маршрутизируется как обычная группа;
+// отличие — кнопки ДИНАМИЧЕСКИЕ: сетка пересчитывается по их числу.
+// ---------------------------------------------------------------------------
+
+/** Размер одной комбо-кнопки, dp. */
+const val COMBO_SIZE = 56f
+
+/** Шаг сетки между центрами комбо-кнопок, dp (зазор 8dp — как в кластере A/B). */
+const val COMBO_PITCH = 64f
+
+/** Колонок в сетке комбо-кнопок: 1; 2×N до четырёх; 3×N дальше. */
+fun comboCols(n: Int): Int = when {
+    n <= 1 -> 1
+    n <= 4 -> 2
+    else -> 3
+}
+
+/**
+ * Спеки комбо-кнопок: id «K<id кнопки>» (префикс маршрутизируется в
+ * ComboRunner, см. GamepadInput), подпись — имя кнопки. Сетка выровнена
+ * по центру якоря группы.
+ */
+fun comboSpecs(buttons: List<ComboButton>): List<CtrlSpec> {
+    if (buttons.isEmpty()) return emptyList()
+    val cols = comboCols(buttons.size)
+    val rows = (buttons.size + cols - 1) / cols
+    return buttons.mapIndexed { i, b ->
+        val dx = ((i % cols) - (cols - 1) / 2f) * COMBO_PITCH
+        val dy = ((i / cols) - (rows - 1) / 2f) * COMBO_PITCH
+        CtrlSpec("K${b.id}", b.name, dx, dy, COMBO_SIZE)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -294,7 +346,13 @@ fun ControlsLayer(
         val groups = if (p2Style) {
             listOf(LayoutStore.GroupId.AB2)
         } else {
-            listOf(LayoutStore.GroupId.AB, LayoutStore.GroupId.META)
+            // Комбо-блок в игре показываем только когда есть кнопки;
+            // в редакторе — всегда (рамку можно поставить заранее)
+            if (editing || ComboStore.effective().isNotEmpty()) {
+                listOf(LayoutStore.GroupId.AB, LayoutStore.GroupId.META, LayoutStore.GroupId.COMBO)
+            } else {
+                listOf(LayoutStore.GroupId.AB, LayoutStore.GroupId.META)
+            }
         }
 
         // Порт СВОЕЙ стороны читаем В МОМЕНТ СОБЫТИЯ (бинд-колбэки живут
@@ -473,6 +531,7 @@ private fun GameButton(
     // rememberUpdatedState, иначе корутина держит лямбду первого состава
     val currentOnSelect by rememberUpdatedState(onSelect)
     val isTurbo = spec.id == "TA" || spec.id == "TB"
+    val isCombo = spec.id.startsWith("K") // программируемая комбо-кнопка
     val isPill = spec.id == "SELECT" || spec.id == "START"
     val shape = if (isPill) RoundedCornerShape(12.dp) else CircleShape
 
@@ -518,9 +577,17 @@ private fun GameButton(
             .clip(shape)
             .background(Color.White.copy(alpha = fillAlpha))
             .border(
-                if (isTurbo) 1.dp else 2.dp,
-                if (isTurbo) AccentRed.copy(alpha = alphas.borderTurbo)
-                else Color.White.copy(alpha = alphas.borderMain),
+                when {
+                    isTurbo -> 1.dp
+                    isCombo -> 1.5.dp
+                    else -> 2.dp
+                },
+                when {
+                    isTurbo -> AccentRed.copy(alpha = alphas.borderTurbo)
+                    // комбо-кнопки отличаются красной рамкой (как турбо)
+                    isCombo -> AccentRed.copy(alpha = alphas.borderMain)
+                    else -> Color.White.copy(alpha = alphas.borderMain)
+                },
                 shape
             ),
         contentAlignment = Alignment.Center
@@ -529,7 +596,14 @@ private fun GameButton(
             text = spec.label,
             color = Color.White.copy(alpha = alphas.label),
             fontWeight = FontWeight.Bold,
-            fontSize = if (sizeDp < 50f) 10.sp else 18.sp
+            fontSize = when {
+                // имя комбо-кнопки длинное — мелкий шрифт в две строки
+                isCombo -> 9.sp
+                sizeDp < 50f -> 10.sp
+                else -> 18.sp
+            },
+            textAlign = if (isCombo) TextAlign.Center else TextAlign.Unspecified,
+            lineHeight = if (isCombo) 10.sp else TextUnit.Unspecified
         )
     }
 }

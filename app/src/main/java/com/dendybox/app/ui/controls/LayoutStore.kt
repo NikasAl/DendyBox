@@ -13,7 +13,10 @@ import androidx.compose.runtime.setValue
  *                   основные B/A под ними;
  *  [GroupId.META] — пилюли Select / Start отдельным блоком;
  *  [GroupId.DPAD2]/[GroupId.AB2] — второй набор для локальной игры на двоих
- *                   (видим только в режиме «2 игрока», турбо-кнопок нет).
+ *                   (видим только в режиме «2 игрока», турбо-кнопок нет);
+ *  [GroupId.COMBO] — программируемые комбо-кнопки (наполнение — ComboStore:
+ *                   пресеты игры + пользовательские; блока нет на экране,
+ *                   пока список пуст — кроме редактора).
  *
  * Каждая группа независимо перемещается и масштабируется в редакторе
  * (Screen.EDIT). [Group.x]/[Group.y] — якорь группы (центр) в долях экрана,
@@ -24,7 +27,7 @@ import androidx.compose.runtime.setValue
  */
 class LayoutStore(private val prefs: SharedPreferences) {
 
-    enum class GroupId { DPAD, AB, META, DPAD2, AB2 }
+    enum class GroupId { DPAD, AB, META, DPAD2, AB2, COMBO }
 
     data class Group(val x: Float, val y: Float, val scale: Float)
 
@@ -37,6 +40,8 @@ class LayoutStore(private val prefs: SharedPreferences) {
     var dpad2: Group by mutableStateOf(DEF_DPAD2)
         private set
     var ab2: Group by mutableStateOf(DEF_AB2)
+        private set
+    var combo: Group by mutableStateOf(DEF_COMBO)
         private set
 
     init {
@@ -61,6 +66,8 @@ class LayoutStore(private val prefs: SharedPreferences) {
                 meta = read("meta", DEF_META)
                 dpad2 = read("dpad2", DEF_DPAD2)
                 ab2 = read("ab2", DEF_AB2)
+                // комбо-группа появилась позже раскладки v3 — отсутствие не ошибка
+                combo = read("combo", DEF_COMBO)
             } catch (_: Exception) {
                 // повреждённые данные — используем значения по умолчанию
             }
@@ -71,6 +78,7 @@ class LayoutStore(private val prefs: SharedPreferences) {
         meta = sanitize(meta)
         dpad2 = sanitize(dpad2)
         ab2 = sanitize(ab2)
+        combo = sanitize(combo)
     }
 
     fun group(id: GroupId): Group = when (id) {
@@ -79,6 +87,7 @@ class LayoutStore(private val prefs: SharedPreferences) {
         GroupId.META -> meta
         GroupId.DPAD2 -> dpad2
         GroupId.AB2 -> ab2
+        GroupId.COMBO -> combo
     }
 
     /** Обновить группу; значения зажимаются в допустимые пределы. */
@@ -90,6 +99,7 @@ class LayoutStore(private val prefs: SharedPreferences) {
             GroupId.META -> meta = v
             GroupId.DPAD2 -> dpad2 = v
             GroupId.AB2 -> ab2 = v
+            GroupId.COMBO -> combo = v
         }
         persist()
     }
@@ -106,6 +116,7 @@ class LayoutStore(private val prefs: SharedPreferences) {
             .put("meta", j(meta))
             .put("dpad2", j(dpad2))
             .put("ab2", j(ab2))
+            .put("combo", j(combo))
             .toString()
     }
 
@@ -138,6 +149,7 @@ class LayoutStore(private val prefs: SharedPreferences) {
         // группы P2 необязательны: старый экспорт (3 группы) тоже импортируется
         read("dpad2")?.let { dpad2 = sanitize(it) }
         read("ab2")?.let { ab2 = sanitize(it) }
+        read("combo")?.let { combo = sanitize(it) }
         persist()
         return true
     }
@@ -149,6 +161,7 @@ class LayoutStore(private val prefs: SharedPreferences) {
         meta = DEF_META
         dpad2 = DEF_DPAD2
         ab2 = DEF_AB2
+        combo = DEF_COMBO
         persist()
     }
 
@@ -197,12 +210,16 @@ class LayoutStore(private val prefs: SharedPreferences) {
         val DEF_DPAD2 = Group(0.72f, 0.70f, 1.0f)
         val DEF_AB2 = Group(0.93f, 0.70f, 1.0f)
 
+        // Комбо-кнопки: низ по центру, между крестовиной и A/B
+        val DEF_COMBO = Group(0.5f, 0.86f, 1.0f)
+
         fun title(id: GroupId): String = when (id) {
             GroupId.DPAD -> "Крестовина"
             GroupId.AB -> "Кнопки A/B"
             GroupId.META -> "Select/Start"
             GroupId.DPAD2 -> "Крестовина 2 (P2)"
             GroupId.AB2 -> "A/B игрока 2"
+            GroupId.COMBO -> "Комбо-кнопки"
         }
     }
 }

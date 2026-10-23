@@ -603,4 +603,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     // Юнит-тесты чистой логики ввода (FingerRouter — симуляция touch-событий)
     testImplementation("junit:junit:4.13.2")
+    // Настоящий org.json для JVM-тестов (на устройстве — системный; в тестах
+    // «android.jar» лишь заглушка, падавшая с «not mocked» — ComboJson)
+    testImplementation("org.json:json:20240303")
 }

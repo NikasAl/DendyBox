@@ -121,6 +121,7 @@ fun PauseOverlay(
     onReset: () -> Unit,
     onSlots: () -> Unit,
     onCheats: () -> Unit,
+    onCombos: () -> Unit,
     onEdit: () -> Unit,
     onSettings: () -> Unit,
     onNet: () -> Unit,
@@ -178,6 +179,8 @@ fun PauseOverlay(
                     )
                     MenuButton("Слоты сохранений", guarded(onSlots))
                     MenuButton("Читы", guarded(onCheats))
+                    // Комбо-кнопки НЕ ломают синхронизацию — в сетевой игре доступны
+                    MenuButton("Комбо-кнопки", onCombos)
                     MenuButton("Настройки управления", onEdit)
                     MenuButton("Настройки", onSettings)
                     OutlinedButton(onClick = onExit, modifier = Modifier.fillMaxWidth()) {
@@ -564,7 +567,8 @@ fun EditBar(
                 val chipIds = if (showP2) LayoutStore.GroupId.entries else listOf(
                     LayoutStore.GroupId.DPAD,
                     LayoutStore.GroupId.AB,
-                    LayoutStore.GroupId.META
+                    LayoutStore.GroupId.META,
+                    LayoutStore.GroupId.COMBO
                 )
                 chipIds.forEach { gid ->
                     FilterChip(

@@ -63,15 +63,24 @@ object GamepadInput {
         }
     }
 
+    /**
+     * Обработчик программируемых комбо-кнопок (id БЕЗ префикса «K»):
+     * выставляется игровым экраном; down — запустить проигрывание
+     * последовательности, up — игнорируется (комбо доигрывается до конца).
+     */
+    var onComboPress: ((id: String, down: Boolean, port: Int) -> Unit)? = null
+
     /** Кнопка [id] нажата на порту [port] (турбо — только P1). */
     private fun handlePress(id: String, down: Boolean, port: Int) {
-        when (id) {
-            "A" -> InputState.press(InputState.A, down, port)
-            "B" -> InputState.press(InputState.B, down, port)
-            "TA" -> if (port == 0) InputState.turboActiveA = down
-            "TB" -> if (port == 0) InputState.turboActiveB = down
-            "SELECT" -> InputState.press(InputState.SELECT, down, port)
-            "START" -> InputState.press(InputState.START, down, port)
+        when {
+            id == "A" -> InputState.press(InputState.A, down, port)
+            id == "B" -> InputState.press(InputState.B, down, port)
+            id == "TA" -> if (port == 0) InputState.turboActiveA = down
+            id == "TB" -> if (port == 0) InputState.turboActiveB = down
+            id == "SELECT" -> InputState.press(InputState.SELECT, down, port)
+            id == "START" -> InputState.press(InputState.START, down, port)
+            // «K<u…>»/«Kp<N>» — программируемая комбо-кнопка (см. ComboStore)
+            id.length > 1 && id[0] == 'K' -> onComboPress?.invoke(id.substring(1), down, port)
         }
     }
 
