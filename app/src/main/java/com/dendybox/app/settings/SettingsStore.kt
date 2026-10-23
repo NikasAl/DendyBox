@@ -16,6 +16,10 @@ object SettingsStore {
     val haptics = MutableStateFlow(true)      // вибрация при уроне (если игра задаёт байт урона)
     val dpadSize = MutableStateFlow(58f)      // радиус крестовины, dp
     val controlsOpacity = MutableStateFlow(0.55f) // общая видимость контролов: заливки, рамки, крестовина, подписи
+    // Скин кнопок: идентификатор из ControlSkins (classic/neon/pixel/dark).
+    // Строка хранится здесь, ресолв в ControlSkin — в ui.controls (byId),
+    // чтобы настройки не зависели от UI-слоя
+    val controlSkin = MutableStateFlow("classic")
     val twoLocal = MutableStateFlow(false)    // локальный режим «2 игрока» на одном экране
 
     fun init(ctx: Context) {
@@ -27,6 +31,7 @@ object SettingsStore {
         haptics.value = prefs.getBoolean("haptics", true)
         dpadSize.value = prefs.getFloat("dpadSize", 58f)
         controlsOpacity.value = prefs.getFloat("controlsOpacity", 0.55f)
+        controlSkin.value = prefs.getString("controlSkin", "classic") ?: "classic"
         twoLocal.value = prefs.getBoolean("twoLocal", false)
     }
 
@@ -36,6 +41,7 @@ object SettingsStore {
     fun setHaptics(v: Boolean) { haptics.value = v; edit().putBoolean("haptics", v) }
     fun setDpadSize(v: Float) { dpadSize.value = v; edit().putFloat("dpadSize", v) }
     fun setControlsOpacity(v: Float) { controlsOpacity.value = v; edit().putFloat("controlsOpacity", v) }
+    fun setControlSkin(v: String) { controlSkin.value = v; edit().putString("controlSkin", v) }
     fun setTwoLocal(v: Boolean) { twoLocal.value = v; edit().putBoolean("twoLocal", v) }
 
     private fun edit() = prefs.edit()

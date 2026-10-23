@@ -8,6 +8,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -53,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -64,6 +67,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.dendybox.app.saves.SaveManager
 import com.dendybox.app.settings.SettingsStore
+import com.dendybox.app.ui.controls.ControlSkins
 import com.dendybox.app.ui.controls.LayoutStore
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -378,6 +382,15 @@ fun SettingsPanel(
                 opacity, 0.2f, 0.9f
             ) { SettingsStore.setControlsOpacity(it) }
 
+            // Скин кнопок: применяется ко ВСЕМ контролам сразу, в т.ч. на живом
+            // игровом экране (кнопки/крестовина собирают SettingsStore.controlSkin)
+            val skinId by SettingsStore.controlSkin.collectAsState()
+            SettingSkinChips(
+                "Скин кнопок",
+                "Форма и цвет всех контролов; меняется сразу, без перезапуска игры",
+                skinId
+            ) { SettingsStore.setControlSkin(it) }
+
             SettingSwitch(
                 "Звук",
                 "Звук игры; быстро выключить можно иконкой динамика у кнопки паузы",
@@ -446,6 +459,47 @@ private fun SettingSlider(
             onValueChange = onChange,
             modifier = Modifier.width(180.dp)
         )
+    }
+}
+
+@Composable
+private fun SettingSkinChips(
+    title: String,
+    subtitle: String,
+    selectedId: String,
+    onSelect: (String) -> Unit
+) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Text(title, style = MaterialTheme.typography.bodyLarge)
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(
+            Modifier
+                .horizontalScroll(rememberScrollState())
+                .padding(top = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            ControlSkins.ALL.forEach { skin ->
+                FilterChip(
+                    selected = selectedId == skin.id,
+                    onClick = { onSelect(skin.id) },
+                    label = { Text(skin.title) },
+                    // Мини-превью скина: заливка с его рамкой
+                    leadingIcon = {
+                        Box(
+                            Modifier
+                                .size(14.dp)
+                                .clip(CircleShape)
+                                .background(skin.fill)
+                                .border(2.dp, skin.border, CircleShape)
+                        )
+                    }
+                )
+            }
+        }
     }
 }
 

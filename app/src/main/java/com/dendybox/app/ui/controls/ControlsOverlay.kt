@@ -32,10 +32,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -527,13 +529,22 @@ private fun GameButton(
     val opacity by SettingsStore.controlsOpacity.collectAsState()
     // Слайдер двигает и рамку, и подпись вместе с заливкой (см. ControlAlphas)
     val alphas = ControlAlphas.of(opacity)
+    // Скин: форма/цвета/шрифт. collectAsState — смена скина перекрашивает
+    // кнопку на живом игровом экране, без рестарта
+    val skin = ControlSkins.byId(SettingsStore.controlSkin.collectAsState().value)
     // pointerInput-корутины живут дольше рекомпозиций — колбэки читаем через
     // rememberUpdatedState, иначе корутина держит лямбду первого состава
     val currentOnSelect by rememberUpdatedState(onSelect)
     val isTurbo = spec.id == "TA" || spec.id == "TB"
     val isCombo = spec.id.startsWith("K") // программируемая комбо-кнопка
     val isPill = spec.id == "SELECT" || spec.id == "START"
-    val shape = if (isPill) RoundedCornerShape(12.dp) else CircleShape
+    // Форму задаёт скин (круг для A/B, капсула для SEL/START в классике);
+    // в «Пикселе» всё угловатое. Логика нажатий и размеры от формы не зависят
+    val shape = when (if (isPill) skin.shapeMeta else skin.shapeMain) {
+        SkinShape.CIRCLE -> CircleShape
+        SkinShape.PILL -> RoundedCornerShape(12.dp)
+        SkinShape.SQUARE -> RoundedCornerShape(3.dp)
+    }
 
     val fillAlpha = when {
         pressed -> minOf(1f, opacity + 0.3f)
@@ -575,7 +586,7 @@ private fun GameButton(
                 }
             )
             .clip(shape)
-            .background(Color.White.copy(alpha = fillAlpha))
+            .background(skin.fill.copy(alpha = fillAlpha))
             .border(
                 when {
                     isTurbo -> 1.dp
@@ -583,10 +594,10 @@ private fun GameButton(
                     else -> 2.dp
                 },
                 when {
-                    isTurbo -> AccentRed.copy(alpha = alphas.borderTurbo)
-                    // комбо-кнопки отличаются красной рамкой (как турбо)
-                    isCombo -> AccentRed.copy(alpha = alphas.borderMain)
-                    else -> Color.White.copy(alpha = alphas.borderMain)
+                    isTurbo -> skin.turboBorder.copy(alpha = alphas.borderTurbo)
+                    // комбо-кнопки отличаются рамкой (в классике — красной, как турбо)
+                    isCombo -> skin.comboBorder.copy(alpha = alphas.borderMain)
+                    else -> skin.border.copy(alpha = alphas.borderMain)
                 },
                 shape
             ),
@@ -594,8 +605,9 @@ private fun GameButton(
     ) {
         Text(
             text = spec.label,
-            color = Color.White.copy(alpha = alphas.label),
+            color = skin.label.copy(alpha = alphas.label),
             fontWeight = FontWeight.Bold,
+            fontFamily = if (skin.monospace) FontFamily.Monospace else null,
             fontSize = when {
                 // имя комбо-кнопки длинное — мелкий шрифт в две строки
                 isCombo -> 9.sp
@@ -640,6 +652,8 @@ fun DpadLayer(
     // Слайдер «Видимость» действует и на крестовину (обе — P1 и P2)
     val opacity by SettingsStore.controlsOpacity.collectAsState()
     val alphas = ControlAlphas.of(opacity)
+    // Скин крестовины: collectAsState — перекраска без рестарта (см. GameButton)
+    val skin = ControlSkins.byId(SettingsStore.controlSkin.collectAsState().value)
     val g = store.group(gid) // recomposition при изменении позиции/масштаба
     val st = remember { DpadState() }
     // см. GameButton: pointerInput живёт дольше рекомпозиций — читаем
@@ -766,7 +780,7 @@ fun DpadLayer(
 
         // Сама крестовина — рисуется ВСЕГДА
         Canvas(Modifier.fillMaxSize()) {
-            drawDpad(Offset(cx, cy), rPx, st.bits, alphas)
+            drawDpad(Offset(cx, cy), rPx, st.bits, alphas, skin)
         }
     }
 }
@@ -810,11 +824,21 @@ private fun angularDist(a: Double, b: Double): Double {
 
 /**
  * Отрисовка крестовины. Все альфы — из [a] ([ControlAlphas]): слайдер
- * «Видимость» управляет и крестовиной, а не только кнопками.
+ * «Видимость» управляет и крестовиной, а не только кнопками. Цвета и стиль
+ * — из скина [skin]: «Классический/Неон/Тёмный» рисуют круг со стрелками,
+ * «Пиксель» — цельный крест как на Dendy-геймпаде.
  */
-private fun DrawScope.drawDpad(center: Offset, r: Float, bits: Int, a: ControlAlphas) {
-    drawCircle(Color.White.copy(alpha = a.dpadFill), radius = r, center = center)
-    drawCircle(Color.White.copy(alpha = a.dpadStroke), radius = r, center = center, style = Stroke(2.dp.toPx()))
+private fun DrawScope.drawDpad(center: Offset, r: Float, bits: Int, a: ControlAlphas, skin: ControlSkin) {
+    when (skin.dpadVisual) {
+        DpadVisual.TRIANGLES -> drawDpadTriangles(center, r, bits, a, skin)
+        DpadVisual.CROSS -> drawDpadCross(center, r, bits, a, skin)
+    }
+}
+
+/** Круг с треугольными стрелками — классический вид (цвета — из скина). */
+private fun DrawScope.drawDpadTriangles(center: Offset, r: Float, bits: Int, a: ControlAlphas, skin: ControlSkin) {
+    drawCircle(skin.dpadFill.copy(alpha = a.dpadFill), radius = r, center = center)
+    drawCircle(skin.dpadStroke.copy(alpha = a.dpadStroke), radius = r, center = center, style = Stroke(2.dp.toPx()))
 
     fun arrow(angle: Double, active: Boolean) {
         val rad = Math.toRadians(angle)
@@ -829,12 +853,60 @@ private fun DrawScope.drawDpad(center: Offset, r: Float, bits: Int, a: ControlAl
             lineTo(b2.x, b2.y)
             close()
         }
-        drawPath(path, if (active) AccentRed.copy(alpha = a.dpadArrowActive) else Color.White.copy(alpha = a.dpadArrow))
+        drawPath(
+            path,
+            if (active) skin.dpadArrowActive.copy(alpha = a.dpadArrowActive)
+            else skin.dpadArrow.copy(alpha = a.dpadArrow)
+        )
     }
 
     arrow(0.0, (bits and InputState.RIGHT) != 0)
     arrow(90.0, (bits and InputState.DOWN) != 0)
     arrow(180.0, (bits and InputState.LEFT) != 0)
     arrow(270.0, (bits and InputState.UP) != 0)
-    drawCircle(Color.White.copy(alpha = a.dpadDot), radius = 3.dp.toPx(), center = center)
+    drawCircle(skin.dpadDot.copy(alpha = a.dpadDot), radius = 3.dp.toPx(), center = center)
+}
+
+/**
+ * Крестовина «Пиксель»: цельный плюс, как на настоящем Dendy-геймпаде —
+ * угловатый контур из двух планок (полутолщина 0.36·R, плечи до 0.95·R),
+ * прижатое плечо подсвечивается целиком. Подсветка — от кромки центрального
+ * квадрата до кончика плеча, поэтому соседние плечи не накладываются друг
+ * на друга и не уплотняют альфу; обводка рисуется последней — контур чёткий.
+ */
+private fun DrawScope.drawDpadCross(center: Offset, r: Float, bits: Int, a: ControlAlphas, skin: ControlSkin) {
+    val t = r * 0.36f // полутолщина планки
+    val outline = Path().apply {
+        // Контур «плюса» — 12 вершин по часовой стрелке
+        moveTo(center.x - r, center.y - t)
+        lineTo(center.x - t, center.y - t)
+        lineTo(center.x - t, center.y - r)
+        lineTo(center.x + t, center.y - r)
+        lineTo(center.x + t, center.y - t)
+        lineTo(center.x + r, center.y - t)
+        lineTo(center.x + r, center.y + t)
+        lineTo(center.x + t, center.y + t)
+        lineTo(center.x + t, center.y + r)
+        lineTo(center.x - t, center.y + r)
+        lineTo(center.x - t, center.y + t)
+        lineTo(center.x - r, center.y + t)
+        close()
+    }
+    drawPath(outline, skin.dpadFill.copy(alpha = a.dpadFill))
+
+    val activeFill = skin.dpadArrowActive.copy(alpha = a.dpadArrowActive)
+    fun armHorizontal(fromLeft: Boolean) {
+        val left = if (fromLeft) center.x - r else center.x + t
+        drawRect(activeFill, topLeft = Offset(left, center.y - t), size = Size(r - t, 2f * t))
+    }
+    fun armVertical(fromTop: Boolean) {
+        val top = if (fromTop) center.y - r else center.y + t
+        drawRect(activeFill, topLeft = Offset(center.x - t, top), size = Size(2f * t, r - t))
+    }
+    if (bits and InputState.LEFT != 0) armHorizontal(fromLeft = true)
+    if (bits and InputState.RIGHT != 0) armHorizontal(fromLeft = false)
+    if (bits and InputState.UP != 0) armVertical(fromTop = true)
+    if (bits and InputState.DOWN != 0) armVertical(fromTop = false)
+
+    drawPath(outline, skin.dpadStroke.copy(alpha = a.dpadStroke), style = Stroke(2.dp.toPx()))
 }
