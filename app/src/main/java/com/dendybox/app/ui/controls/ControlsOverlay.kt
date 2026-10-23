@@ -27,6 +27,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +46,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dendybox.app.input.InputState
+import com.dendybox.app.input.TouchGeometry
 import com.dendybox.app.settings.SettingsStore
 import com.dendybox.app.ui.AccentRed
 import kotlin.math.abs
@@ -279,6 +281,149 @@ private fun hitTestButton(
     return null
 }
 
+/**
+ * Кнопки группы [gid], накрытые «пятном касания» — кругом радиуса [r] px
+ * с центром ([x], [y]) px (координаты РОДИТЕЛЯ, как в [hitTestButton]).
+ * Пересечение круга с прямоугольником кнопки — по ближайшей её точке.
+ *
+ * Турбо-кнопки (TA/TB) из пятна ИСКЛЮЧЕНЫ: их нажимают только целенаправленно
+ * центром пальца — случайное касание краем широкого пятна не должно включать
+ * автоповтор. Возвращается пустой набор при r <= 0 (устройство не сообщает
+ * размер касания) — тогда работает только нажатие центром пальца.
+ */
+private fun patchHitButtons(
+    gid: LayoutStore.GroupId,
+    g: LayoutStore.Group,
+    x: Float,
+    y: Float,
+    r: Float,
+    parentPx: IntSize,
+    density: Density
+): Set<String> {
+    val res = LinkedHashSet<String>()
+    if (r <= 0f) return res
+    val cx = g.x * parentPx.width
+    val cy = g.y * parentPx.height
+    val d = g.scale * density.density
+    for (spec in specsOf(gid)) {
+        if (spec.id == "TA" || spec.id == "TB") continue
+        val s = spec.size * d
+        val left = cx + spec.dx * d - s / 2f
+        val top = cy + spec.dy * d - s / 2f
+        val nx = x.coerceIn(left, left + s) - x
+        val ny = y.coerceIn(top, top + s) - y
+        if (nx * nx + ny * ny <= r * r) res.add(spec.id)
+    }
+    return res
+}
+
+/**
+ * «Ядро» пятна касания пальца [pointerId] — радиус (px) круга, который
+ * палец нажимает НАМЕРЕННО. Android сообщает эллипс контакта пальца
+ * (AXIS_TOUCH_MAJOR/MINOR, в тех же px, что и координаты); сырые значения
+ * складывает в реестр [TouchGeometry] dispatchTouchEvent активности —
+ * из Compose-событий геометрия контакта недоступна (internal).
+ *
+ * Берём четверть большой оси как консервативную оценку: мягкие ткани пальца
+ * растекаются шире зоны реального нажатия, и «всё пятно целиком» делало бы
+ * ко-нажатие случайным. 0 — устройство не сообщает размер (эмулятор, мышь):
+ * ко-нажатие отключено, работает поведение «только центр пальца».
+ */
+private const val PATCH_CORE_FRACTION = 0.25f
+
+private fun contactCoreRadiusPx(pointerId: Long): Float {
+    val major = TouchGeometry.majorPx(pointerId)
+    return if (major > 0f) major * PATCH_CORE_FRACTION else 0f
+}
+
+/**
+ * Преобразовать координату в СИСТЕМЕ зоны касаний группы (локальной — с
+ * началом в левом-верхнем углу контента группы) в координаты родителя —
+ * систему [hitTestButton]/[patchHitButtons]. Зона смещена на центр группы
+ * минус её левый/верхний выступ, значит родительская координата = локальная
+ * + центр − выступ. Масштаб/позиция читаются на момент события, как и в
+ * самом hit-test (см. комментарий к hitTestButton).
+ */
+private fun toGroupParent(
+    gid: LayoutStore.GroupId,
+    lx: Float,
+    ly: Float,
+    store: LayoutStore,
+    parentPx: IntSize,
+    density: Density
+): Offset {
+    val g = store.group(gid)
+    val e = extentsDp(gid, 0f)
+    val l = with(density) { (e.left * g.scale).dp.toPx() }
+    val t = with(density) { (e.top * g.scale).dp.toPx() }
+    return Offset(lx + g.x * parentPx.width - l, ly + g.y * parentPx.height - t)
+}
+
+/**
+ * Обработка касаний ОДНОЙ группы кнопок (см. [FingerRouter]). Навешивается
+ * на невидимый бокс РОВНО ПО КОНТУНТУ группы — не на весь экран:
+ * полноэкранная зона, стоящая в z-порядке выше крестовины и верхней панели,
+ * перехватывает у них hit-test (Compose отдаёт касание самому верхнему
+ * узлу под точкой), и стрелки с меню глохнут.
+ */
+private fun Modifier.groupTouches(
+    gid: LayoutStore.GroupId,
+    store: LayoutStore,
+    parentPx: IntSize,
+    density: Density,
+    pressedState: SnapshotStateMap<String, Boolean>,
+    portProvider: () -> Int
+): Modifier = pointerInput(gid, parentPx) {
+    val router = FingerRouter(
+        hitTest = { x, y ->
+            val p = toGroupParent(gid, x, y, store, parentPx, density)
+            hitTestButton(gid, store.group(gid), p.x, p.y, parentPx, density)
+        },
+        patchTest = { x, y, r ->
+            val p = toGroupParent(gid, x, y, store, parentPx, density)
+            patchHitButtons(gid, store.group(gid), p.x, p.y, r, parentPx, density)
+        },
+        onPress = { id, down ->
+            pressedState[id] = down
+            handlePress(id, down, portProvider())
+        }
+    )
+    try {
+        awaitEachGesture {
+            while (true) {
+                val event = awaitPointerEvent()
+                for (change in event.changes) {
+                    val pid = change.id.value
+                    // размер пятна касания пальца — из сырых событий активности
+                    val patchR = contactCoreRadiusPx(pid)
+                    // handled = палец под управлением ЭТОЙ группы — его события
+                    // потребляем, чтобы не «протекали» ниже (крестовина)
+                    val handled = when {
+                        // уже наш палец — пересчитать набор кнопок по позиции
+                        change.pressed && router.isTracked(pid) -> {
+                            router.move(pid, change.position.x, change.position.y, patchR)
+                            true
+                        }
+                        // новое касание — назначить, если попал в кнопку группы
+                        change.pressed && change.changedToDown() ->
+                            router.down(pid, change.position.x, change.position.y, patchR)
+                        // отпускание/отмена — снять палец с кнопок
+                        !change.pressed -> router.up(pid)
+                        else -> false
+                    }
+                    if (handled) change.consume()
+                }
+                // Жест окончен, когда отпущены ВСЕ пальцы
+                if (event.changes.none { it.pressed }) break
+            }
+        }
+    } finally {
+        // Отмена корутины (уход с экрана, смена размера окна, пересоздание
+        // слоя) — отжать всё, иначе кнопка залипла бы навсегда
+        router.releaseAll()
+    }
+}
+
 @Composable
 fun ControlsLayer(
     store: LayoutStore,
@@ -315,64 +460,16 @@ fun ControlsLayer(
         // Раньше каждая кнопка ловила касания сама (detectTapGestures +
         // awaitRelease) и «привязывала» палец до отпускания — быстрые серии
         // «сначала A, потом B без отрыва пальца» были невозможны.
-        val touchMods = if (editing) Modifier else {
-            var m: Modifier = Modifier
-            groups.forEach { gid ->
-                m = m.then(
-                    Modifier.pointerInput(gid, parentPx) {
-                        val pressedState = pressedByGroup[gid]
-                            ?: return@pointerInput
-                        val router = FingerRouter(
-                            hitTest = { x, y ->
-                                hitTestButton(gid, store.group(gid), x, y, parentPx, density)
-                            },
-                            onPress = { id, down ->
-                                pressedState[id] = down
-                                handlePress(id, down, currentPort)
-                            }
-                        )
-                        try {
-                            awaitEachGesture {
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    for (change in event.changes) {
-                                        val pid = change.id.value
-                                        // handled = палец под управлением ЭТОЙ группы —
-                                        // его события потребляем, чтобы не «протекали»
-                                        // ниже (верхняя панель, крестовина)
-                                        val handled = when {
-                                            // уже наш палец — переназначить кнопку по позиции
-                                            change.pressed && router.isTracked(pid) -> {
-                                                router.move(pid, change.position.x, change.position.y)
-                                                true
-                                            }
-                                            // новое касание — назначить, если попал в кнопку группы
-                                            change.pressed && change.changedToDown() ->
-                                                router.down(pid, change.position.x, change.position.y)
-                                            // отпускание/отмена — снять палец с кнопки
-                                            !change.pressed -> router.up(pid)
-                                            else -> false
-                                        }
-                                        if (handled) change.consume()
-                                    }
-                                    // Жест окончен, когда отпущены ВСЕ пальцы
-                                    if (event.changes.none { it.pressed }) break
-                                }
-                            }
-                        } finally {
-                            // Отмена корутины (уход с экрана, смена размера окна,
-                            // пересоздание слоя) — отжать всё, иначе кнопка
-                            // залипла бы навсегда
-                            router.releaseAll()
-                        }
-                    }
-                )
-            }
-            m
-        }
-
-        Box(Modifier.fillMaxSize().then(touchMods)) {
-            groups.forEach { gid ->
+        //
+        // Зона касаний каждой группы — бокс РОВНО ПО КОНТУНТУ группы, а НЕ
+        // весь экран: полноэкранная зона стоит в z-порядке выше крестовины
+        // и верхней панели, и Compose отдаёт ей hit-test любой точки экрана
+        // (событие получает только самый верхний узел под пальцем) —
+        // крестовина и меню при этом событий не видят вообще. Маленький бокс
+        // перехватывает только точки возле своих кнопок, как раньше делали
+        // сами кнопки; скольжение пальца между кнопками внутри группы
+        // сохраняется (палец «захватывается» зоной до отпускания).
+        groups.forEach { gid ->
             val g = store.group(gid) // чтение state — рекомпозиция при изменении
             val cx = g.x * parentPx.width
             val cy = g.y * parentPx.height
@@ -381,6 +478,24 @@ fun ControlsLayer(
             val tPx = with(density) { (e.top * g.scale).dp.toPx() }
             val rPx = with(density) { (e.right * g.scale).dp.toPx() }
             val bPx = with(density) { (e.bottom * g.scale).dp.toPx() }
+
+            // Невидимая ЗОНА КАСАНИЙ группы (только в игре) — по контенту
+            if (!editing) {
+                key(gid) {
+                    val pressedState = pressedByGroup.getValue(gid)
+                    Box(
+                        Modifier
+                            .offset { IntOffset((cx - lPx).toInt(), (cy - tPx).toInt()) }
+                            .size(
+                                ((lPx + rPx) / density.density).dp,
+                                ((tPx + bPx) / density.density).dp
+                            )
+                            .groupTouches(
+                                gid, store, parentPx, density, pressedState
+                            ) { currentPort }
+                    )
+                }
+            }
 
             // Рамка группы — ПОД кнопками (объявлена раньше в z-порядке)
             if (editing) {
@@ -423,8 +538,7 @@ fun ControlsLayer(
                     )
                 }
             }
-            } // groups.forEach
-        } // Box(touchMods)
+        } // groups.forEach
     }
 }
 

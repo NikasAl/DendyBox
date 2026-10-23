@@ -3,6 +3,7 @@ package com.dendybox.app
 import android.app.Activity
 import android.os.Build
 import android.os.Bundle
+import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -39,6 +40,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.dendybox.app.cheats.CheatRepository
 import com.dendybox.app.emulator.EmulatorEngine
 import com.dendybox.app.input.InputState
+import com.dendybox.app.input.TouchGeometry
 import com.dendybox.app.settings.CollectionCatalog
 import com.dendybox.app.settings.GameConfig
 import com.dendybox.app.settings.SettingsStore
@@ -49,6 +51,17 @@ import com.dendybox.app.ui.screens.Screen
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    /**
+     * Сырой поток касаний — источник «пятна касания» для экранных кнопок:
+     * Compose не публикует геометрию контакта (AXIS_TOUCH_MAJOR), поэтому
+     * записываем её до раздачи событий (см. TouchGeometry). Ничего не меняет
+     * в обработке — только попутное чтение.
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        TouchGeometry.record(ev)
+        return super.dispatchTouchEvent(ev)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
