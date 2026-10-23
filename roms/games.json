@@ -23,6 +23,17 @@
       { "file": "c_super_contra.nes", "title": "Супер Контра" },
       { "file": "c_contra_force.nes",    "title": "Контра Форс" }
     ]
+  },
+
+  "tmnt4in1.nes": {
+    "flavor": "tmnt4in1",
+    "title": "Черепашки Ниндзя",
+    "games": [
+      { "file": "t_tmnt.nes",             "title": "Черепашки Ниндзя" },
+      { "file": "t_tmnt2.nes",            "title": "Черепашки Ниндзя II" },
+      { "file": "t_tmnt3.nes",            "title": "Черепашки Ниндзя III" },
+      { "file": "t_tmnt_tournament.nes",  "title": "Черепашки Ниндзя Турнир" }
+    ]
   }
 
 }
