@@ -62,10 +62,14 @@ data class CtrlSpec(val id: String, val label: String, val dx: Float, val dy: Fl
 /**
  * Кластер A/B — «джойстик Dendy»: ВЕРХНИЙ ряд — турбо (B′, A′),
  * под ними основные B и A (B слева, A справа, как на геймпаде Dendy).
+ * Турбо ТОГО ЖЕ РАЗМЕРА, что основные (64dp). Ряд выше на dy = -72:
+ * зазор между рядами 8dp — ровно как между B и A по горизонтали
+ * (расстояние центров 72 при размере 64). При прежних dy = -60 круги
+ * 64dp наезжали бы друг на друга на 4dp.
  */
 val SPECS_AB = listOf(
-    CtrlSpec("TB", "B′", -36f, -60f, 42f),
-    CtrlSpec("TA", "A′", 36f, -60f, 42f),
+    CtrlSpec("TB", "B′", -36f, -72f, 64f),
+    CtrlSpec("TA", "A′", 36f, -72f, 64f),
     CtrlSpec("B", "B", -36f, 0f, 64f),
     CtrlSpec("A", "A", 36f, 0f, 64f)
 )
@@ -93,16 +97,20 @@ private fun specsOf(id: LayoutStore.GroupId): List<CtrlSpec> = when (id) {
  * Границы контента группы относительно её якоря (в dp при масштабе 1.0):
  * насколько контент выступает влево/вверх/вправо/вниз от центра.
  *
- * Блок A/B НЕсимметричен по вертикали: сверху турбо-ряд (81dp), снизу —
- * только основные кнопки (32dp). Рамка в редакторе и зажим в границах
- * экрана следуют контенту — без «фантомного» отступа под кнопками,
- * чтобы блок можно было прижать к нижнему краю экрана.
+ * Блок A/B НЕсимметричен по вертикали: сверху турбо-ряд (72dp до центра
+ * кнопки + 32dp радиус = 104dp), снизу — только основные кнопки (32dp).
+ * У A/B второго игрока турбо нет — рамка обнимает кнопки симметрично.
+ * Рамка в редакторе и зажим в границах экрана следуют контенту — без
+ * «фантомного» отступа под кнопками, чтобы блок можно было прижать
+ * к нижнему краю экрана.
  */
 data class Extents(val left: Float, val top: Float, val right: Float, val bottom: Float)
 
 fun extentsDp(id: LayoutStore.GroupId, dpadBaseRadiusDp: Float): Extents = when (id) {
-    LayoutStore.GroupId.AB, LayoutStore.GroupId.AB2 ->
-        Extents(left = 68f, top = 81f, right = 68f, bottom = 32f)
+    LayoutStore.GroupId.AB ->
+        Extents(left = 68f, top = 104f, right = 68f, bottom = 32f)
+    LayoutStore.GroupId.AB2 ->
+        Extents(left = 68f, top = 32f, right = 68f, bottom = 32f)
     LayoutStore.GroupId.META -> Extents(left = 52f, top = 23f, right = 52f, bottom = 23f)
     LayoutStore.GroupId.DPAD, LayoutStore.GroupId.DPAD2 -> Extents(
         left = dpadBaseRadiusDp,
@@ -395,6 +403,53 @@ fun ControlsLayer(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Прозрачность контролов
+// ---------------------------------------------------------------------------
+
+/**
+ * Слайдер «Видимость» (SettingsStore.controlsOpacity, 0.2..0.9) задаёт ОБЩУЮ
+ * яркость ВСЕХ экранных контролов: заливки кнопок, их рамки, подписи и вся
+ * крестовина (круг, обводка, стрелки, точка) движутся вместе.
+ *
+ * Базовые альфы дизайна (рамка 0.55 / турбо 0.35, крестовина
+ * 0.12/0.55/0.42/0.95/0.5, подпись 0.9) сохраняют относительные веса и
+ * умножаются на k = opacity / [ControlAlphas.OPACITY_BASE]: при базовом
+ * значении слайдера вид ровно такой же, как до ведения слайдера для всех
+ * элементов; к максимуму всё становится плотнее, к минимуму — равномерно
+ * растворяется. Заливки кнопок и подсветка нажатия по-прежнему считаются
+ * напрямую из opacity (они и раньше от него зависели).
+ */
+internal data class ControlAlphas(
+    val borderMain: Float,
+    val borderTurbo: Float,
+    val label: Float,
+    val dpadFill: Float,
+    val dpadStroke: Float,
+    val dpadArrow: Float,
+    val dpadArrowActive: Float,
+    val dpadDot: Float
+) {
+    companion object {
+        /** Базовое (проектное) значение слайдера — при нём k = 1. */
+        const val OPACITY_BASE = 0.55f
+
+        fun of(opacity: Float): ControlAlphas {
+            val k = (opacity / OPACITY_BASE).coerceIn(0f, 1f / OPACITY_BASE)
+            return ControlAlphas(
+                borderMain = (0.55f * k).coerceAtMost(1f),
+                borderTurbo = (0.35f * k).coerceAtMost(1f),
+                label = (0.9f * k).coerceAtMost(1f),
+                dpadFill = (0.12f * k).coerceIn(0f, 1f),
+                dpadStroke = (0.55f * k).coerceAtMost(1f),
+                dpadArrow = (0.42f * k).coerceIn(0f, 1f),
+                dpadArrowActive = (0.95f * k).coerceAtMost(1f),
+                dpadDot = (0.5f * k).coerceAtMost(1f)
+            )
+        }
+    }
+}
+
 @Composable
 private fun GameButton(
     spec: CtrlSpec,
@@ -412,6 +467,8 @@ private fun GameButton(
     pressed: Boolean
 ) {
     val opacity by SettingsStore.controlsOpacity.collectAsState()
+    // Слайдер двигает и рамку, и подпись вместе с заливкой (см. ControlAlphas)
+    val alphas = ControlAlphas.of(opacity)
     // pointerInput-корутины живут дольше рекомпозиций — колбэки читаем через
     // rememberUpdatedState, иначе корутина держит лямбду первого состава
     val currentOnSelect by rememberUpdatedState(onSelect)
@@ -424,7 +481,6 @@ private fun GameButton(
         isTurbo -> opacity * 0.75f
         else -> opacity
     }
-    val borderAlpha = if (isTurbo) 0.35f else 0.55f
 
     Box(
         modifier = Modifier
@@ -463,14 +519,15 @@ private fun GameButton(
             .background(Color.White.copy(alpha = fillAlpha))
             .border(
                 if (isTurbo) 1.dp else 2.dp,
-                if (isTurbo) AccentRed.copy(alpha = borderAlpha) else Color.White.copy(alpha = borderAlpha),
+                if (isTurbo) AccentRed.copy(alpha = alphas.borderTurbo)
+                else Color.White.copy(alpha = alphas.borderMain),
                 shape
             ),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = spec.label,
-            color = Color.White.copy(alpha = 0.9f),
+            color = Color.White.copy(alpha = alphas.label),
             fontWeight = FontWeight.Bold,
             fontSize = if (sizeDp < 50f) 10.sp else 18.sp
         )
@@ -506,6 +563,9 @@ fun DpadLayer(
     val gid = if (p2Style) LayoutStore.GroupId.DPAD2 else LayoutStore.GroupId.DPAD
     val density = LocalDensity.current
     val dpadBaseR by SettingsStore.dpadSize.collectAsState()
+    // Слайдер «Видимость» действует и на крестовину (обе — P1 и P2)
+    val opacity by SettingsStore.controlsOpacity.collectAsState()
+    val alphas = ControlAlphas.of(opacity)
     val g = store.group(gid) // recomposition при изменении позиции/масштаба
     val st = remember { DpadState() }
     // см. GameButton: pointerInput живёт дольше рекомпозиций — читаем
@@ -632,7 +692,7 @@ fun DpadLayer(
 
         // Сама крестовина — рисуется ВСЕГДА
         Canvas(Modifier.fillMaxSize()) {
-            drawDpad(Offset(cx, cy), rPx, st.bits)
+            drawDpad(Offset(cx, cy), rPx, st.bits, alphas)
         }
     }
 }
@@ -674,9 +734,13 @@ private fun angularDist(a: Double, b: Double): Double {
     return abs(d)
 }
 
-private fun DrawScope.drawDpad(center: Offset, r: Float, bits: Int) {
-    drawCircle(Color.White.copy(alpha = 0.12f), radius = r, center = center)
-    drawCircle(Color.White.copy(alpha = 0.55f), radius = r, center = center, style = Stroke(2.dp.toPx()))
+/**
+ * Отрисовка крестовины. Все альфы — из [a] ([ControlAlphas]): слайдер
+ * «Видимость» управляет и крестовиной, а не только кнопками.
+ */
+private fun DrawScope.drawDpad(center: Offset, r: Float, bits: Int, a: ControlAlphas) {
+    drawCircle(Color.White.copy(alpha = a.dpadFill), radius = r, center = center)
+    drawCircle(Color.White.copy(alpha = a.dpadStroke), radius = r, center = center, style = Stroke(2.dp.toPx()))
 
     fun arrow(angle: Double, active: Boolean) {
         val rad = Math.toRadians(angle)
@@ -691,12 +755,12 @@ private fun DrawScope.drawDpad(center: Offset, r: Float, bits: Int) {
             lineTo(b2.x, b2.y)
             close()
         }
-        drawPath(path, if (active) AccentRed.copy(alpha = 0.95f) else Color.White.copy(alpha = 0.42f))
+        drawPath(path, if (active) AccentRed.copy(alpha = a.dpadArrowActive) else Color.White.copy(alpha = a.dpadArrow))
     }
 
     arrow(0.0, (bits and InputState.RIGHT) != 0)
     arrow(90.0, (bits and InputState.DOWN) != 0)
     arrow(180.0, (bits and InputState.LEFT) != 0)
     arrow(270.0, (bits and InputState.UP) != 0)
-    drawCircle(Color.White.copy(alpha = 0.5f), radius = 3.dp.toPx(), center = center)
+    drawCircle(Color.White.copy(alpha = a.dpadDot), radius = 3.dp.toPx(), center = center)
 }

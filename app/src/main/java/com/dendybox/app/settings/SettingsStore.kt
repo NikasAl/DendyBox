@@ -15,7 +15,7 @@ object SettingsStore {
     val sound = MutableStateFlow(true)
     val haptics = MutableStateFlow(true)      // вибрация при уроне (если игра задаёт байт урона)
     val dpadSize = MutableStateFlow(58f)      // радиус крестовины, dp
-    val controlsOpacity = MutableStateFlow(0.55f) // прозрачность кнопок
+    val controlsOpacity = MutableStateFlow(0.55f) // общая видимость контролов: заливки, рамки, крестовина, подписи
     val twoLocal = MutableStateFlow(false)    // локальный режим «2 игрока» на одном экране
 
     fun init(ctx: Context) {

@@ -370,8 +370,8 @@ fun SettingsPanel(
                 dpadSize, 44f, 80f
             ) { SettingsStore.setDpadSize(it) }
             SettingSlider(
-                "Видимость кнопок",
-                "Сейчас: %d%% (меньше — прозрачнее)".format((opacity * 100).toInt()),
+                "Видимость контролов",
+                "Сейчас: %d%% (крестовина, кнопки и рамки; меньше — прозрачнее)".format((opacity * 100).toInt()),
                 opacity, 0.2f, 0.9f
             ) { SettingsStore.setControlsOpacity(it) }
 
