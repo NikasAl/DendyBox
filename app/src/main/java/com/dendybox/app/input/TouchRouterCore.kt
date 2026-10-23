@@ -20,26 +20,27 @@ import com.dendybox.app.ui.controls.FingerRouter
  * → этот класс → FingerRouter (состояние пальцев и счётчики одной группы)
  * → колбэк подписчика (InputState + подсветка + диагностический лог).
  *
- * Владение пальцем: при КАСАНИИ (down) палец забирает ПЕРВАЯ привязанная
- * группа, чью кнопку он накрыл центром или пятном; пальцы, стартовавшие
- * мимо всех кнопок (крестовина, меню, пустота), ядром не отслеживаются
- * вовсе — скольжение такого пальца на кнопки ничего не нажимает (семантика
- * прежних зон сохранена). Крестовина и верхнее меню продолжают обрабатываться
- * Compose-обработчиками как раньше — ядро к их координатам равнодушно.
+ * Самовосстановление «потерянных» пальцев: если событие КАСАНИЯ пальца по
+ * какой-то причине не дошло до ядра (гонка привязки групп при старте игры,
+ * проглоченный системой POINTER_DOWN), палец больше не остаётся мёртвым до
+ * отпускания: его ПЕРВОЕ ЖЕ движение пробует взять в работу — нажатие
+ * уходит с временем события движения. Пальцы, чьё касание БЫЛО обработано,
+ * но попало мимо кнопок (крестовина, меню, пустота), как и прежде не
+ * отслеживаются — скольжение такого пальца на кнопки ничего не нажимает
+ * (семантика прежних зон сохранена).
  *
  * Все вызовы — с главного потока (dispatchTouchEvent): синхронизация не
  * нужна. Время — ev.eventTime (мс, monotonic uptime): подписчик получает
  * ТОЧНОЕ время события нажатия, никаких таймеров/дебаунсов внутри.
+ *
+ * @param onAdopt диагностический колбэк: палец взят в работу движением
+ * (его касание не было обработано ядром) — для лога «adopt:» в GamepadInput.
  */
 class TouchRouterCore(
-    /**
-     * Доля большой оси контакта, считающаяся «ядром пятна» (радиус круга,
-     * которым палец нажимает НАМЕРЕННО; см. patchTest в FingerRouter).
-     */
-    val patchCoreFraction: Float = 0.25f
+    private val onAdopt: ((pointerId: Long, group: String, button: String, tMs: Long) -> Unit)? = null
 ) {
-    /** Итог пробы: какая группа забрала бы палец и какие кнопки накрыты. */
-    data class DownInfo(val group: String?, val buttons: Set<String>, val patchR: Float)
+    /** Итог пробы: какая группа забрала бы палец и какая кнопка под ним. */
+    data class DownInfo(val group: String?, val button: String?)
 
     private class BoundGroup(val id: String, val router: FingerRouter)
 
@@ -47,6 +48,10 @@ class TouchRouterCore(
     private val groups = LinkedHashMap<String, BoundGroup>()
     // pointerId → id группы-владельца
     private val owners = HashMap<Long, String>()
+    // пальцы, чьё КАСАНИЕ было обработано ядром (в т.ч. мимо всех кнопок).
+    // Только у НЕЗАНЕСЁННЫХ сюда пальцев движение пробует «усыновление» —
+    // значит, их потерянный DOWN не оставит кнопку мёртвой до отрыва.
+    private val downSeen = HashSet<Long>()
     private var sink: ((group: String, button: String, down: Boolean, port: Int, tMs: Long) -> Unit)? =
         null
     // Время события, обрабатываемого ПРЯМО СЕЙЧАС: колбэки FingerRouter
@@ -67,11 +72,10 @@ class TouchRouterCore(
     fun bindGroup(
         id: String,
         hitTest: (Float, Float) -> String?,
-        patchTest: ((Float, Float, Float) -> Set<String>)?,
         port: () -> Int
     ) {
         unbindGroup(id, tMs)
-        groups[id] = BoundGroup(id, FingerRouter(hitTest, patchTest) { b, d ->
+        groups[id] = BoundGroup(id, FingerRouter(hitTest) { b, d ->
             sink?.invoke(id, b, d, port(), tMs)
         })
     }
@@ -86,45 +90,44 @@ class TouchRouterCore(
     }
 
     /**
-     * Проба (без изменения состояния): что было бы нажато пальцем (центр +
-     * пятно) и какая группа его забрала бы. Для диагностического лога.
+     * Проба (без изменения состояния): какая кнопка находится под точкой
+     * и какая группа её забрала бы. Для диагностического лога.
      */
-    fun probe(x: Float, y: Float, majorPx: Float): DownInfo {
-        val patchR = majorPx * patchCoreFraction
+    fun probe(x: Float, y: Float): DownInfo {
         for (g in groups.values) {
-            val buttons = g.router.buttonsAt(x, y, patchR)
-            if (buttons.isNotEmpty()) return DownInfo(g.id, buttons, patchR)
+            val b = g.router.buttonAt(x, y)
+            if (b != null) return DownInfo(g.id, b)
         }
-        return DownInfo(null, emptySet(), patchR)
+        return DownInfo(null, null)
     }
 
     /** Касание новым пальцем (ACTION_DOWN / ACTION_POINTER_DOWN). */
-    fun down(pointerId: Long, x: Float, y: Float, majorPx: Float, tMs: Long) {
+    fun down(pointerId: Long, x: Float, y: Float, tMs: Long) {
         this.tMs = tMs
+        downSeen.add(pointerId)
         if (owners.containsKey(pointerId)) return // повторный down того же пальца
-        val patchR = majorPx * patchCoreFraction
-        for (g in groups.values) {
-            val buttons = g.router.buttonsAt(x, y, patchR)
-            if (buttons.isNotEmpty()) {
-                g.router.down(pointerId, x, y, patchR)
-                owners[pointerId] = g.id
-                return
-            }
-        }
-        // мимо всех кнопок — чужой палец: не отслеживается вовсе
+        claim(pointerId, x, y)
     }
 
-    /** Движение пальца — пересчитать кнопки ТОЛЬКО владеющей группы. */
-    fun move(pointerId: Long, x: Float, y: Float, majorPx: Float, tMs: Long) {
-        val gid = owners[pointerId] ?: return
-        val g = groups[gid] ?: return
+    /**
+     * Движение пальца: пересчитать кнопку владеющей группы. Палец без
+     * владельца, чьё касание не обрабатывалось ядром, пробуется «усыновить»
+     * (см. [claim]) — потерянный DOWN не оставляет кнопку мёртвой.
+     */
+    fun move(pointerId: Long, x: Float, y: Float, tMs: Long) {
         this.tMs = tMs
-        g.router.move(pointerId, x, y, majorPx * patchCoreFraction)
+        val gid = owners[pointerId]
+        if (gid != null) {
+            groups[gid]?.router?.move(pointerId, x, y)
+            return
+        }
+        if (!downSeen.contains(pointerId)) claim(pointerId, x, y)
     }
 
     /** Отпускание ОДНОГО пальца (ACTION_POINTER_UP). */
     fun up(pointerId: Long, tMs: Long) {
         this.tMs = tMs
+        downSeen.remove(pointerId)
         val gid = owners.remove(pointerId) ?: return
         groups[gid]?.router?.up(pointerId)
     }
@@ -136,6 +139,26 @@ class TouchRouterCore(
     fun liftAll(tMs: Long) {
         this.tMs = tMs
         owners.clear()
+        downSeen.clear()
         for (g in groups.values) g.router.releaseAll()
+    }
+
+    /**
+     * Отдать палец первой группе, чью кнопку он накрыл центром.
+     * Если касание этого пальца раньше не обрабатывалось ядром (палец
+     * «потерян»), сообщаем в [onAdopt] — для диагностического лога.
+     */
+    private fun claim(pointerId: Long, x: Float, y: Float) {
+        for (g in groups.values) {
+            val b = g.router.buttonAt(x, y) ?: continue
+            if (g.router.down(pointerId, x, y)) {
+                owners[pointerId] = g.id
+                if (!downSeen.contains(pointerId)) {
+                    downSeen.add(pointerId)
+                    onAdopt?.invoke(pointerId, g.id, b, tMs)
+                }
+            }
+            return
+        }
     }
 }

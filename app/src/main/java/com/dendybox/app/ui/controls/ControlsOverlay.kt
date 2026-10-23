@@ -270,44 +270,6 @@ private fun hitTestButton(
     return null
 }
 
-/**
- * Кнопки группы [gid], накрытые «пятном касания» — кругом радиуса [r] px
- * с центром ([x], [y]) px в координатах ОКНА (сырые события активности —
- * см. GamepadInput; при immersive-полноэкране совпадают с координатами
- * родителя слоёв управления). Пересечение круга с прямоугольником кнопки —
- * по ближайшей её точке. Формулы позиций — ТЕ ЖЕ, что при отрисовке.
- *
- * Турбо-кнопки (TA/TB) из пятна ИСКЛЮЧЕНЫ: их нажимают только целенаправленно
- * центром пальца — случайное касание краем широкого пятна не должно включать
- * автоповтор. Возвращается пустой набор при r <= 0 (устройство не сообщает
- * размер касания) — тогда работает только нажатие центром пальца.
- */
-private fun patchHitButtons(
-    gid: LayoutStore.GroupId,
-    g: LayoutStore.Group,
-    x: Float,
-    y: Float,
-    r: Float,
-    parentPx: IntSize,
-    density: Density
-): Set<String> {
-    val res = LinkedHashSet<String>()
-    if (r <= 0f) return res
-    val cx = g.x * parentPx.width
-    val cy = g.y * parentPx.height
-    val d = g.scale * density.density
-    for (spec in specsOf(gid)) {
-        if (spec.id == "TA" || spec.id == "TB") continue
-        val s = spec.size * d
-        val left = cx + spec.dx * d - s / 2f
-        val top = cy + spec.dy * d - s / 2f
-        val nx = x.coerceIn(left, left + s) - x
-        val ny = y.coerceIn(top, top + s) - y
-        if (nx * nx + ny * ny <= r * r) res.add(spec.id)
-    }
-    return res
-}
-
 @Composable
 fun ControlsLayer(
     store: LayoutStore,
@@ -344,15 +306,18 @@ fun ControlsLayer(
         // одновременно) и гасила быстрые серии нажатий. Теперь сырые
         // MotionEvents принимает dispatchTouchEvent активности и передаёт
         // GamepadInput → TouchRouterCore → FingerRouter (скольжение пальца
-        // между кнопками, ко-нажатие пятном, многопальцевость — см.
-        // TouchRouterCore). Compose остаётся только подсветку рисовать.
+        // между кнопками, многопальцевость, самовосстановление потерянных
+        // пальцев — см. TouchRouterCore). Compose остаётся только подсветку
+        // рисовать. «Пятно касания» (ко-нажатие по эллипсу контакта) УДАЛЕНО:
+        // AXIS_TOUCH_MAJOR на устройствах недостоверен — пятно нажимало
+        // соседнюю кнопку в момент касания и отжимало её первым же движением.
         //
         // Группа привязана, пока слой в игровом режиме на экране: уход в
         // паузу/редактор (DisposableEffect.onDispose) отжимает её кнопки.
-        // Геометрия (hitTest/patchTest) читает масштаб/позицию НА МОМЕНТ
-        // СОБЫТИЯ — редактирование раскладки не рассинхронизирует hit-test
-        // и рисунок. Координаты — окно (сырые события); при immersive-
-        // полноэкране совпадают с координатами этого BoxWithConstraints.
+        // Геометрия (hitTest) читает масштаб/позицию НА МОМЕНТ СОБЫТИЯ —
+        // редактирование раскладки не рассинхронизирует hit-test и рисунок.
+        // Координаты — окно (сырые события); при immersive-полноэкране
+        // совпадают с координатами этого BoxWithConstraints.
         groups.forEach { gid ->
             val g = store.group(gid) // чтение state — рекомпозиция при изменении
             val cx = g.x * parentPx.width
@@ -376,9 +341,6 @@ fun ControlsLayer(
                             gid.name,
                             hitTest = { x, y ->
                                 hitTestButton(gid, store.group(gid), x, y, px, den)
-                            },
-                            patchTest = { x, y, r ->
-                                patchHitButtons(gid, store.group(gid), x, y, r, px, den)
                             },
                             port = { currentPort },
                             pressed = pressedState
