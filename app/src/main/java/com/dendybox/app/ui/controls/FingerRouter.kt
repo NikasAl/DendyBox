@@ -32,8 +32,9 @@ package com.dendybox.app.ui.controls
  * (app/src/test/.../FingerRouterTest.kt), которые прогоняют сценарии
  * касаний: down/move/up с несколькими пальцами одновременно.
  *
- * Методы потокобезопасности не требуют: все вызовы — из единственной
- * pointerInput-корутины своей группы.
+ * Вызывается ядром сырых касаний (input/TouchRouterCore) с главного потока;
+ * на каждый палец события приходят ПО ПОРЯДКУ диспетча — с точным временем
+ * исходного MotionEvent (оно уходит в колбэк onPress подписчиком ядра).
  */
 internal class FingerRouter(
     /** Кнопка под ЦЕНТРОМ пальца (x, y) px или null — вне кнопок группы. */
@@ -63,6 +64,14 @@ internal class FingerRouter(
     fun isTracked(pointerId: Long): Boolean = assigned.containsKey(pointerId)
 
     fun isPressed(button: String): Boolean = counts.containsKey(button)
+
+    /**
+     * Кнопки под точкой (центр + пятно касания) БЕЗ изменения состояния —
+     * проба. Используется ядром сырых касаний (TouchRouterCore), чтобы решить,
+     * какая группа забирает палец, и для диагностического лога.
+     */
+    internal fun buttonsAt(x: Float, y: Float, patchR: Float): Set<String> =
+        desiredAt(x, y, patchR)
 
     /**
      * Касание пальца [pointerId] в точке ([x], [y]) px, ядро пятна —

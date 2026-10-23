@@ -39,8 +39,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.dendybox.app.cheats.CheatRepository
 import com.dendybox.app.emulator.EmulatorEngine
+import com.dendybox.app.input.GamepadInput
 import com.dendybox.app.input.InputState
-import com.dendybox.app.input.TouchGeometry
 import com.dendybox.app.settings.CollectionCatalog
 import com.dendybox.app.settings.GameConfig
 import com.dendybox.app.settings.SettingsStore
@@ -52,13 +52,14 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     /**
-     * Сырой поток касаний — источник «пятна касания» для экранных кнопок:
-     * Compose не публикует геометрию контакта (AXIS_TOUCH_MAJOR), поэтому
-     * записываем её до раздачи событий (см. TouchGeometry). Ничего не меняет
-     * в обработке — только попутное чтение.
+     * Сырой поток касаний — ЕДИНСТВЕННЫЙ источник нажатий экранных кнопок
+     * (A/B/Select/Start/турбо, см. GamepadInput): маршрутизация идёт мимо
+     * Compose, потому что hit-path/жестовая машина Compose на устройстве
+     * теряла второй палец (A+B) и гасила быстрые серии нажатий. События не
+     * потребляются — крестовина и меню работают как раньше.
      */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        TouchGeometry.record(ev)
+        GamepadInput.onMotionEvent(ev)
         return super.dispatchTouchEvent(ev)
     }
 

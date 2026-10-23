@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -27,7 +28,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,7 +36,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -45,8 +44,8 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dendybox.app.input.GamepadInput
 import com.dendybox.app.input.InputState
-import com.dendybox.app.input.TouchGeometry
 import com.dendybox.app.settings.SettingsStore
 import com.dendybox.app.ui.AccentRed
 import kotlin.math.abs
@@ -111,18 +110,6 @@ fun extentsDp(id: LayoutStore.GroupId, dpadBaseRadiusDp: Float): Extents = when 
         right = dpadBaseRadiusDp,
         bottom = dpadBaseRadiusDp
     )
-}
-
-/** Кнопка [id] нажата на порту [port] (турбо — только P1). */
-private fun handlePress(id: String, down: Boolean, port: Int) {
-    when (id) {
-        "A" -> InputState.press(InputState.A, down, port)
-        "B" -> InputState.press(InputState.B, down, port)
-        "TA" -> if (port == 0) InputState.turboActiveA = down
-        "TB" -> if (port == 0) InputState.turboActiveB = down
-        "SELECT" -> InputState.press(InputState.SELECT, down, port)
-        "START" -> InputState.press(InputState.START, down, port)
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -259,8 +246,10 @@ private fun GroupFrame(
  * Формулы позиций — ТЕ ЖЕ, что при отрисовке кнопок в [ControlsLayer]:
  * центр группы (g.x/g.y в долях экрана) + офсет спецификации, размер
  * с масштабом. null — точка вне кнопок группы.
+ * Координаты — окно (сырые события активности, см. GamepadInput); при
+ * immersive-полноэкране совпадают с координатами родителя слоёв управления.
  * Позиция/масштаб читаются на момент события — редактирование раскладки
- * без пересоздания обработчика не рассинхронизирует hit-test и рисунок.
+ * без пересоздания бинда не рассинхронизирует hit-test и рисунок.
  */
 private fun hitTestButton(
     gid: LayoutStore.GroupId,
@@ -283,8 +272,10 @@ private fun hitTestButton(
 
 /**
  * Кнопки группы [gid], накрытые «пятном касания» — кругом радиуса [r] px
- * с центром ([x], [y]) px (координаты РОДИТЕЛЯ, как в [hitTestButton]).
- * Пересечение круга с прямоугольником кнопки — по ближайшей её точке.
+ * с центром ([x], [y]) px в координатах ОКНА (сырые события активности —
+ * см. GamepadInput; при immersive-полноэкране совпадают с координатами
+ * родителя слоёв управления). Пересечение круга с прямоугольником кнопки —
+ * по ближайшей её точке. Формулы позиций — ТЕ ЖЕ, что при отрисовке.
  *
  * Турбо-кнопки (TA/TB) из пятна ИСКЛЮЧЕНЫ: их нажимают только целенаправленно
  * центром пальца — случайное касание краем широкого пятна не должно включать
@@ -317,113 +308,6 @@ private fun patchHitButtons(
     return res
 }
 
-/**
- * «Ядро» пятна касания пальца [pointerId] — радиус (px) круга, который
- * палец нажимает НАМЕРЕННО. Android сообщает эллипс контакта пальца
- * (AXIS_TOUCH_MAJOR/MINOR, в тех же px, что и координаты); сырые значения
- * складывает в реестр [TouchGeometry] dispatchTouchEvent активности —
- * из Compose-событий геометрия контакта недоступна (internal).
- *
- * Берём четверть большой оси как консервативную оценку: мягкие ткани пальца
- * растекаются шире зоны реального нажатия, и «всё пятно целиком» делало бы
- * ко-нажатие случайным. 0 — устройство не сообщает размер (эмулятор, мышь):
- * ко-нажатие отключено, работает поведение «только центр пальца».
- */
-private const val PATCH_CORE_FRACTION = 0.25f
-
-private fun contactCoreRadiusPx(pointerId: Long): Float {
-    val major = TouchGeometry.majorPx(pointerId)
-    return if (major > 0f) major * PATCH_CORE_FRACTION else 0f
-}
-
-/**
- * Преобразовать координату в СИСТЕМЕ зоны касаний группы (локальной — с
- * началом в левом-верхнем углу контента группы) в координаты родителя —
- * систему [hitTestButton]/[patchHitButtons]. Зона смещена на центр группы
- * минус её левый/верхний выступ, значит родительская координата = локальная
- * + центр − выступ. Масштаб/позиция читаются на момент события, как и в
- * самом hit-test (см. комментарий к hitTestButton).
- */
-private fun toGroupParent(
-    gid: LayoutStore.GroupId,
-    lx: Float,
-    ly: Float,
-    store: LayoutStore,
-    parentPx: IntSize,
-    density: Density
-): Offset {
-    val g = store.group(gid)
-    val e = extentsDp(gid, 0f)
-    val l = with(density) { (e.left * g.scale).dp.toPx() }
-    val t = with(density) { (e.top * g.scale).dp.toPx() }
-    return Offset(lx + g.x * parentPx.width - l, ly + g.y * parentPx.height - t)
-}
-
-/**
- * Обработка касаний ОДНОЙ группы кнопок (см. [FingerRouter]). Навешивается
- * на невидимый бокс РОВНО ПО КОНТУНТУ группы — не на весь экран:
- * полноэкранная зона, стоящая в z-порядке выше крестовины и верхней панели,
- * перехватывает у них hit-test (Compose отдаёт касание самому верхнему
- * узлу под точкой), и стрелки с меню глохнут.
- */
-private fun Modifier.groupTouches(
-    gid: LayoutStore.GroupId,
-    store: LayoutStore,
-    parentPx: IntSize,
-    density: Density,
-    pressedState: SnapshotStateMap<String, Boolean>,
-    portProvider: () -> Int
-): Modifier = pointerInput(gid, parentPx) {
-    val router = FingerRouter(
-        hitTest = { x, y ->
-            val p = toGroupParent(gid, x, y, store, parentPx, density)
-            hitTestButton(gid, store.group(gid), p.x, p.y, parentPx, density)
-        },
-        patchTest = { x, y, r ->
-            val p = toGroupParent(gid, x, y, store, parentPx, density)
-            patchHitButtons(gid, store.group(gid), p.x, p.y, r, parentPx, density)
-        },
-        onPress = { id, down ->
-            pressedState[id] = down
-            handlePress(id, down, portProvider())
-        }
-    )
-    try {
-        awaitEachGesture {
-            while (true) {
-                val event = awaitPointerEvent()
-                for (change in event.changes) {
-                    val pid = change.id.value
-                    // размер пятна касания пальца — из сырых событий активности
-                    val patchR = contactCoreRadiusPx(pid)
-                    // handled = палец под управлением ЭТОЙ группы — его события
-                    // потребляем, чтобы не «протекали» ниже (крестовина)
-                    val handled = when {
-                        // уже наш палец — пересчитать набор кнопок по позиции
-                        change.pressed && router.isTracked(pid) -> {
-                            router.move(pid, change.position.x, change.position.y, patchR)
-                            true
-                        }
-                        // новое касание — назначить, если попал в кнопку группы
-                        change.pressed && change.changedToDown() ->
-                            router.down(pid, change.position.x, change.position.y, patchR)
-                        // отпускание/отмена — снять палец с кнопок
-                        !change.pressed -> router.up(pid)
-                        else -> false
-                    }
-                    if (handled) change.consume()
-                }
-                // Жест окончен, когда отпущены ВСЕ пальцы
-                if (event.changes.none { it.pressed }) break
-            }
-        }
-    } finally {
-        // Отмена корутины (уход с экрана, смена размера окна, пересоздание
-        // слоя) — отжать всё, иначе кнопка залипла бы навсегда
-        router.releaseAll()
-    }
-}
-
 @Composable
 fun ControlsLayer(
     store: LayoutStore,
@@ -443,32 +327,32 @@ fun ControlsLayer(
             listOf(LayoutStore.GroupId.AB, LayoutStore.GroupId.META)
         }
 
-        // Порт СВОЕЙ стороны читаем В МОМЕНТ СОБЫТИЯ (pointerInput-корутины
-        // живут дольше рекомпозиций; см. комментарий в GameScreen про netplay)
+        // Порт СВОЕЙ стороны читаем В МОМЕНТ СОБЫТИЯ (бинд-колбэки живут
+        // дольше рекомпозиций; см. комментарий в GameScreen про netplay)
         val currentPort by rememberUpdatedState(inputPort)
 
-        // Подсветка нажатых кнопок: одна карта на группу. Обновляется из
-        // pointerInput-корутины (маршрутизатором), читается в GameButton —
+        // Подсветка нажатых кнопок: одна карта на группу. Обновляется
+        // маршрутизатором сырых касаний (GamepadInput), читается в GameButton —
         // рекомпозиция кнопки при нажатии/отжатии.
         val pressedByGroup = remember {
             groups.associateWith { mutableStateMapOf<String, Boolean>() }
         }
 
-        // Касания обрабатываются НА УРОВНЕ ГРУППЫ, а не на каждой кнопке:
-        // палец может скользить между кнопками — при переезде из области A
-        // в область B кнопка A отжимается, B нажимается (см. FingerRouter).
-        // Раньше каждая кнопка ловила касания сама (detectTapGestures +
-        // awaitRelease) и «привязывала» палец до отпускания — быстрые серии
-        // «сначала A, потом B без отрыва пальца» были невозможны.
+        // КАК РАБОТАЮТ КАСАНИЯ КНОПОК в игровом режиме: НЕ через Compose.
+        // Раньше зона группы была pointerInput-боксом — hit-path/жестовая
+        // машина Compose на устройстве теряла второй палец (A+B не нажимались
+        // одновременно) и гасила быстрые серии нажатий. Теперь сырые
+        // MotionEvents принимает dispatchTouchEvent активности и передаёт
+        // GamepadInput → TouchRouterCore → FingerRouter (скольжение пальца
+        // между кнопками, ко-нажатие пятном, многопальцевость — см.
+        // TouchRouterCore). Compose остаётся только подсветку рисовать.
         //
-        // Зона касаний каждой группы — бокс РОВНО ПО КОНТУНТУ группы, а НЕ
-        // весь экран: полноэкранная зона стоит в z-порядке выше крестовины
-        // и верхней панели, и Compose отдаёт ей hit-test любой точки экрана
-        // (событие получает только самый верхний узел под пальцем) —
-        // крестовина и меню при этом событий не видят вообще. Маленький бокс
-        // перехватывает только точки возле своих кнопок, как раньше делали
-        // сами кнопки; скольжение пальца между кнопками внутри группы
-        // сохраняется (палец «захватывается» зоной до отпускания).
+        // Группа привязана, пока слой в игровом режиме на экране: уход в
+        // паузу/редактор (DisposableEffect.onDispose) отжимает её кнопки.
+        // Геометрия (hitTest/patchTest) читает масштаб/позицию НА МОМЕНТ
+        // СОБЫТИЯ — редактирование раскладки не рассинхронизирует hit-test
+        // и рисунок. Координаты — окно (сырые события); при immersive-
+        // полноэкране совпадают с координатами этого BoxWithConstraints.
         groups.forEach { gid ->
             val g = store.group(gid) // чтение state — рекомпозиция при изменении
             val cx = g.x * parentPx.width
@@ -479,21 +363,28 @@ fun ControlsLayer(
             val rPx = with(density) { (e.right * g.scale).dp.toPx() }
             val bPx = with(density) { (e.bottom * g.scale).dp.toPx() }
 
-            // Невидимая ЗОНА КАСАНИЙ группы (только в игре) — по контенту
+            // Привязка группы к сырым касаниям (только в игровом режиме)
             if (!editing) {
                 key(gid) {
                     val pressedState = pressedByGroup.getValue(gid)
-                    Box(
-                        Modifier
-                            .offset { IntOffset((cx - lPx).toInt(), (cy - tPx).toInt()) }
-                            .size(
-                                ((lPx + rPx) / density.density).dp,
-                                ((tPx + bPx) / density.density).dp
-                            )
-                            .groupTouches(
-                                gid, store, parentPx, density, pressedState
-                            ) { currentPort }
-                    )
+                    // Актуальные размеры/плотность на момент события: бинд
+                    // живёт дольше рекомпозиций — захватывать значения нельзя
+                    val px by rememberUpdatedState(parentPx)
+                    val den by rememberUpdatedState(density)
+                    DisposableEffect(gid) {
+                        GamepadInput.bindGroup(
+                            gid.name,
+                            hitTest = { x, y ->
+                                hitTestButton(gid, store.group(gid), x, y, px, den)
+                            },
+                            patchTest = { x, y, r ->
+                                patchHitButtons(gid, store.group(gid), x, y, r, px, den)
+                            },
+                            port = { currentPort },
+                            pressed = pressedState
+                        )
+                        onDispose { GamepadInput.unbindGroup(gid.name) }
+                    }
                 }
             }
 
