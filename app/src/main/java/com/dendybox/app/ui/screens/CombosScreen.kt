@@ -73,9 +73,11 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Конфигуратор программируемых комбо-кнопок: пресеты текущей игры
- * (roms/<flavor>.json — только чтение) и пользовательские кнопки
- * (создание/редактирование/удаление, хранятся глобально — ComboStore).
+ * Конфигуратор программируемых комбо-кнопок: пресеты загруженного рома
+ * (только чтение: одиночная игра — roms/<flavor>.json, сборник — пресеты
+ * выбранной игры из roms/games.json, меняются при переключении игры)
+ * и пользовательские кнопки (создание/редактирование/удаление, хранятся
+ * глобально — ComboStore).
  *
  * Шаг последовательности: набор кнопок джойстика (можно несколько —
  * нажимаются ОДНОВРЕМЕННО), пауза 0–500 мс (кратно 50) перед началом шага
@@ -95,6 +97,8 @@ fun ComboPanel(onBack: () -> Unit) {
 
     val presets = GameConfig.comboPresets
     val mine = ComboStore.buttons
+    // Какой ром сборника загружен — в подписи блока пресетов
+    val romTitle = GameConfig.activeRomTitle
 
     Column(
         Modifier
@@ -133,7 +137,8 @@ fun ComboPanel(onBack: () -> Unit) {
         ) {
             if (presets.isNotEmpty()) {
                 Text(
-                    "Пресеты игры (заданы картриджем, менять нельзя)",
+                    if (romTitle != null) "Пресеты «$romTitle» (заданы картриджем, менять нельзя)"
+                    else "Пресеты игры (заданы картриджем, менять нельзя)",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

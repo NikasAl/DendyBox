@@ -172,8 +172,12 @@ private fun AppRoot() {
 
     // ROM: одиночная игра — assets/rom.nes; сборник — выбранная игра из
     // assets/games/. Повторный start после stop безопасен: Native.unload
-    // полностью деинициализирует ядро, сейвы привязаны к SHA-1 нового рома
+    // полностью деинициализирует ядро, сейвы привязаны к SHA-1 нового рома.
+    // Здесь же активируются пресеты комбо выбранного рома: при переключении
+    // игры сборника набор комбо-кнопок меняется (GameConfig.selectRom)
     LaunchedEffect(selectedGame) {
+        val entry = collection?.games?.getOrNull(selectedGame)
+        GameConfig.selectRom(entry?.combos, entry?.title)
         if (collection != null && selectedGame < 0) {
             romBytes = null // показано меню сборника — ром не нужен
             return@LaunchedEffect

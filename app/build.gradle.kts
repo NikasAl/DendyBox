@@ -1,4 +1,5 @@
 import com.android.build.gradle.internal.api.BaseVariantOutputImpl
+import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.util.Properties
 import javax.inject.Inject
@@ -73,7 +74,11 @@ plugins {
 val romsDir = rootProject.file("roms")
 val gamesJsonFile = romsDir.resolve("games.json")
 
-data class CollectionGame(val file: File, val title: String)
+data class CollectionGame(
+    val file: File,
+    val title: String,
+    val combos: List<*>? // пресеты комбо рома (раздел "combos", сырье JSON → в манифест)
+)
 
 data class GameSpec(
     val fileName: String,
@@ -90,6 +95,36 @@ data class GameSpec(
 // "имя.rom в roms/", "title": "Название в меню"} (title необязателен).
 // Минимум 2 игры: для одной есть обычный flavor. Ошибки — GradleException,
 // чтобы сборка упала сразу с понятным текстом, а не на старте приложения.
+// Раздел "combos" записи игры сборника — пресеты комбо-кнопок ЭТОГО рома
+// (формат тот же, что у combos в roms/<flavor>.json). Сырье JSON (List<Map>)
+// уходит в манифест сборника как есть; структура проверяется здесь, чтобы
+// сборка упала с понятным текстом, а пресет молча не пропал в приложении
+// (битые шаги там отбрасываются целиком).
+private val COMBO_BTN_KEYS = setOf("LEFT", "RIGHT", "UP", "DOWN", "A", "B", "START", "SELECT")
+
+private fun parseCombos(item: Map<*, *>, where: String): List<*>? {
+    val raw = item["combos"] ?: return null
+    if (raw !is List<*>) {
+        throw GradleException("$where: combos должен быть массивом [{\"name\": \"...\", \"steps\": [...]}, ...]")
+    }
+    raw.forEachIndexed { ci, c ->
+        if (c !is Map<*, *> || c["name"].toString().isBlank() || c["steps"] !is List<*>) {
+            throw GradleException(
+                "$where: combos[$ci] — ожидается объект {\"name\": \"...\", \"steps\": [{\"b\": \"A\", \"d\": 0}, ...]}"
+            )
+        }
+        (c["steps"] as List<*>).forEachIndexed { si, s ->
+            if (s !is Map<*, *> || s["b"] !in COMBO_BTN_KEYS) {
+                throw GradleException(
+                    "$where: combos[$ci].steps[$si] — шаг без кнопки b " +
+                        "(одна из LEFT/RIGHT/UP/DOWN/A/B/START/SELECT)"
+                )
+            }
+        }
+    }
+    return raw
+}
+
 private fun parseCollection(o: Map<*, *>, name: String): List<CollectionGame> {
     val raw = o["games"] ?: return emptyList()
     if (raw !is List<*>) {
@@ -113,7 +148,8 @@ private fun parseCollection(o: Map<*, *>, name: String): List<CollectionGame> {
         }
         val t = (item["title"] as? String)?.trim().takeUnless { it.isNullOrEmpty() }
             ?: src.nameWithoutExtension
-        CollectionGame(src, t)
+        val combos = parseCombos(item, "roms/games.json [$name]: games[$i]")
+        CollectionGame(src, t, combos)
     }
     if (games.size < 2) {
         throw GradleException("roms/games.json [$name]: в сборнике games должно быть минимум 2 игры (для одной соберите обычный flavor)")
@@ -480,6 +516,9 @@ gameSpecs.forEach { spec ->
         }
         if (cfgSrc.exists()) inputs.file(cfgSrc)
         if (cfgSrc.exists()) outputs.file(outDir.map { it.file("game.json") })
+        // games.json — источник заголовков/пресетов комбо манифеста: правка
+        // файла должна пересобирать манифест, а не отдавать устаревший
+        if (gamesJsonFile.exists()) inputs.file(gamesJsonFile)
         doLast {
             val dir = outDir.get().asFile
             dir.mkdirs()
@@ -522,7 +561,14 @@ gameSpecs.forEach { spec ->
                     val dst = gamesDir.resolve("$i.${g.file.extension.lowercase()}")
                     g.file.copyTo(dst, overwrite = true)
                     if (i > 0) manifest.append(",")
-                    manifest.append("{\"file\":\"${dst.name}\",\"title\":\"${esc(g.title)}\"}")
+                    manifest.append("{\"file\":\"${dst.name}\",\"title\":\"${esc(g.title)}\"")
+                    // Пресеты комбо рома — внутрь объекта игры (закрывающую
+                    // скобку дописываем после): структура уже проверена
+                    // parseCombos; JsonOutput даёт валидный JSON
+                    if (g.combos != null) {
+                        manifest.append(",\"combos\":${JsonOutput.toJson(g.combos)}")
+                    }
+                    manifest.append("}")
                 }
                 manifest.append("]}")
                 dir.resolve("games/games.json").writeText(manifest.toString())

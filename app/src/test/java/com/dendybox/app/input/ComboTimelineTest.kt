@@ -172,8 +172,8 @@ class ComboTimelineTest {
 
     @Test
     fun `старые шаги без новых полей — прежняя сетка 0-100-200-300`() {
-        // Backcompat: ComboStep с дефолтами (hold 100, без with/fromPress) —
-        // тот же таймлайн, что до введения удержаний
+        // Шаги без новых полей (дефолты Kotlin: hold 100, без with/fromPress) —
+        // тот же таймлайн, что и до введения удержаний
         val events = tl(ComboStep("A", 0), ComboStep("B", 100))
         assertEquals(
             listOf(

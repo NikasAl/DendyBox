@@ -19,9 +19,21 @@
     "title": "Контра",
     "menuAlign": "left",
     "games": [
-      { "file": "c_contra.nes",       "title": "Контра" },
-      { "file": "c_super_contra.nes", "title": "Супер Контра" },
-      { "file": "c_contra_force.nes",    "title": "Контра Форс" }
+      { "file": "c_contra.nes",       "title": "Контра",
+        "combos": [
+          { "name": "Автоогонь", "steps": [ { "b": "B", "d": 0, "h": 500 } ] }
+        ]
+      },
+      { "file": "c_super_contra.nes", "title": "Супер Контра",
+        "combos": [
+          { "name": "Автоогонь", "steps": [ { "b": "B", "d": 0, "h": 500 } ] }
+        ]
+      },
+      { "file": "c_contra_force.nes",    "title": "Контра Форс",
+        "combos": [
+          { "name": "Автоогонь", "steps": [ { "b": "B", "d": 0, "h": 500 } ] }
+        ]
+      }
     ]
   },
 
@@ -29,10 +41,54 @@
     "flavor": "tmnt4in1",
     "title": "Черепашки Ниндзя",
     "games": [
-      { "file": "t_tmnt.nes",             "title": "Черепашки Ниндзя" },
-      { "file": "t_tmnt2.nes",            "title": "Черепашки Ниндзя II" },
-      { "file": "t_tmnt3.nes",            "title": "Черепашки Ниндзя III" },
-      { "file": "t_tmnt_tournament.nes",  "title": "Черепашки Ниндзя Турнир" }
+      { "file": "t_tmnt.nes",             "title": "Черепашки Ниндзя",
+        "combos": [
+          { "name": "Прыжок-удар", "steps": [
+            { "b": "A", "d": 0, "h": 200 },
+            { "b": "B", "d": 100, "h": 100, "anchor": "press" }
+          ] }
+        ]
+      },
+      { "file": "t_tmnt2.nes",            "title": "Черепашки Ниндзя II",
+        "combos": [
+          { "name": "Суперудар", "steps": [ { "b": "A", "d": 0, "w": ["B"] } ] },
+          { "name": "Рывок-удар", "steps": [
+            { "b": "RIGHT", "d": 0 },
+            { "b": "RIGHT", "d": 0 },
+            { "b": "B", "d": 0 }
+          ] }
+        ]
+      },
+      { "file": "t_tmnt3.nes",            "title": "Черепашки Ниндзя III",
+        "combos": [
+          { "name": "Суперудар", "steps": [ { "b": "A", "d": 0, "w": ["B"] } ] },
+          { "name": "Рывок-удар", "steps": [
+            { "b": "RIGHT", "d": 0 },
+            { "b": "RIGHT", "d": 0 },
+            { "b": "B", "d": 0 }
+          ] }
+        ]
+      },
+      { "file": "t_tmnt_tournament.nes",  "title": "Черепашки Ниндзя Турнир",
+        "combos": [
+          { "name": "Ультра", "steps": [
+            { "b": "DOWN", "d": 0 },
+            { "b": "RIGHT", "d": 100 },
+            { "b": "B", "d": 100 }
+          ] },
+          { "name": "Разбег-пинок", "steps": [
+            { "b": "RIGHT", "d": 0 },
+            { "b": "RIGHT", "d": 100 },
+            { "b": "A", "d": 100 }
+          ] },
+          { "name": "Разбег-локоть", "steps": [
+            { "b": "RIGHT", "d": 0 },
+            { "b": "RIGHT", "d": 100 },
+            { "b": "B", "d": 100 }
+          ] },
+          { "name": "Зарядка B", "steps": [ { "b": "B", "d": 0, "h": 500 } ] }
+        ]
+      }
     ]
   }
 

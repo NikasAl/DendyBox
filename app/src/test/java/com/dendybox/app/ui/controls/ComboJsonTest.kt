@@ -134,28 +134,25 @@ class ComboJsonTest {
 
     @Test
     fun `битый hold роняет только свою запись`() {
-        // 175 — в диапазоне, но не кратен 50; 550 клэмпится к 500 (см. тест бэксосебисности)
+        // 175 — в диапазоне, но не кратен 50 — запись отбрасывается целиком
         val json = """[{"id":"bad-hold","name":"Х","steps":[{"b":"A","d":0,"h":175}]}]"""
         assertTrue(ComboJson.listFromJson(json).isEmpty())
     }
 
     @Test
-    fun `старые удержания выше 500 сжимаются до максимума, запись жива`() {
-        // Бэксосебисность: конфиги с h=1000..2000 читаются, но удержание сжато
-        assertEquals(
-            500,
-            ComboJson.stepFromJson(org.json.JSONObject("""{"b":"B","h":1000}"""))?.holdMs
-        )
-        assertEquals(
-            500,
-            ComboJson.stepFromJson(org.json.JSONObject("""{"b":"B","h":2000}"""))?.holdMs
-        )
-        // Запись с большим старым удержанием не выбрасывается из списка
+    fun `удержания вне границ отвергаются — строгие границы без сжатия`() {
+        // Строгие границы 50–500: значения выше (даже «старые» 1000–2000)
+        // и ниже — битая запись, никакого сжатия/миграций
+        assertNull(ComboJson.stepFromJson(org.json.JSONObject("""{"b":"B","h":0}""")))
+        assertNull(ComboJson.stepFromJson(org.json.JSONObject("""{"b":"B","h":25}""")))
+        assertNull(ComboJson.stepFromJson(org.json.JSONObject("""{"b":"B","h":550}""")))
+        assertNull(ComboJson.stepFromJson(org.json.JSONObject("""{"b":"B","h":1000}""")))
+        assertNull(ComboJson.stepFromJson(org.json.JSONObject("""{"b":"B","h":2000}""")))
+        // Запись с недопустимым удержанием выбрасывается из списка целиком
         val back = ComboJson.listFromJson(
             """[{"id":"old","name":"Зарядка","steps":[{"b":"B","d":0,"h":1000}]}]"""
         )
-        assertEquals(listOf("old"), back.map { it.id })
-        assertEquals(500, back.single().steps.single().holdMs)
+        assertTrue(back.isEmpty())
     }
 
     @Test
@@ -197,7 +194,8 @@ class ComboJsonTest {
 
     @Test
     fun `пресет из gamejson с подставленным id читается`() {
-        // GameConfig.parseCombos вливает id в объект перед разбором
+        // Пресеты хранятся без id — он подставляется перед разбором
+        // (теперь так делает ComboJson.presetsFromJson)
         val raw = org.json.JSONObject(
             """{"name":"Ультра","steps":[{"b":"DOWN","d":0},{"b":"RIGHT","d":100},{"b":"B","d":100}]}"""
         ).put("id", "preset")
@@ -205,6 +203,27 @@ class ComboJsonTest {
         assertEquals("Ультра", b?.name)
         assertEquals(3, b?.steps?.size)
         assertNull(ComboJson.buttonFromJson(org.json.JSONObject("""{"name":"Без шагов"}""")))
+    }
+
+    @Test
+    fun `пресеты игры из массива читаются, битые пропускаются`() {
+        // ComboJson.presetsFromJson — общий разбор для roms/<flavor>.json
+        // и записей игр сборника в roms/games.json
+        val arr = org.json.JSONArray(
+            """
+            [ {"name":"Суперудар","steps":[{"b":"A","d":0,"w":["B"]}]},
+              {"name":"Битая","steps":[{"b":"ТУРБО","d":0}]},
+              {"name":"Зарядка","steps":[{"b":"B","d":0,"h":500}]} ]
+            """.trimIndent()
+        )
+        val out = ComboJson.presetsFromJson(arr)!!
+        assertEquals(listOf("Суперудар", "Зарядка"), out.map { it.name })
+        assertTrue(out.all { it.id == "preset" })
+        assertEquals("B", out[1].steps.single().btn)
+        assertEquals(500, out[1].steps.single().holdMs)
+        // Массива нет — null (отличить «нет раздела» от пустого)
+        assertNull(ComboJson.presetsFromJson(null))
+        assertEquals(emptyList<ComboButton>(), ComboJson.presetsFromJson(org.json.JSONArray("[]")))
     }
 
     // ------------------------------------------------------------------

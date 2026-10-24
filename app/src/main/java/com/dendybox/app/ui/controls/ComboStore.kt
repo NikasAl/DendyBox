@@ -60,13 +60,14 @@ data class ComboButton(
  * ```
  *   * `w`      — массив дополнительных кнопок: нажимаются одновременно
  *               с главной и отпускаются вместе с ней;
- *   * `h`      — удержание шага, мс (кратно 50, 50–500; нет — 100); старые
- *               значения выше 500 при чтении сжимаются до 500 (запись
- *               остаётся рабочей);
+ *   * `h`      — удержание шага, мс (кратно 50, 50–500; нет — 100);
  *   * `anchor` — "press": пауза `d` отсчитывается от НАЖАТИЯ предыдущего
  *               шага, а не от его отпускания (перекрывающиеся удержания).
- * `d` теперь тоже опционален (нет — 0).
- * Битые элементы молча пропускаются (пресет игры не должен ронять приложение).
+ * `d` опционален (нет — 0).
+ * Строгие границы: шаг сетки 50 мс, пауза 0–500, удержание 50–500 — значение
+ * вне границ или мимо сетки делает шаг недействительным, а запись с ним —
+ * битой. Битые элементы молча пропускаются (пресет игры не должен ронять
+ * приложение).
  */
 object ComboJson {
 
@@ -130,14 +131,34 @@ object ComboJson {
             btn = o.getString("b").trim().uppercase(),
             delayMs = o.optInt("d", 0),
             with = with,
-            // Бэксосебисность: старые удержания до 2000 мс сжимаются до 500 —
-            // запись остаётся рабочей, а не выбрасывается
-            holdMs = o.optInt("h", DEFAULT_HOLD_MS).coerceIn(MIN_HOLD_MS, MAX_HOLD_MS),
+            // Строгие границы: вне 50–500 или мимо сетки 50 запись отбрасывается
+            // целиком (валидация ниже), без сжатия и миграций
+            holdMs = o.optInt("h", DEFAULT_HOLD_MS),
             fromPress = o.optString("anchor", "").trim().lowercase() in ANCHOR_PRESS
         )
         if (validSteps(listOf(s))) s else null
     } catch (_: Exception) {
         null
+    }
+
+    /**
+     * Пресеты игры из JSON-массива (раздел `combos` в roms/<flavor>.json и
+     * в записи игры сборника roms/games.json): id проставляется заглушкой
+     * "preset" — настоящие ("p0", "p1"…) назначает ComboStore.effective().
+     * Битые записи пропускаются; null — массива нет.
+     */
+    fun presetsFromJson(arr: JSONArray?): List<ComboButton>? {
+        arr ?: return null
+        val out = ArrayList<ComboButton>(arr.length())
+        for (i in 0 until arr.length()) {
+            val combo = try {
+                buttonFromJson(arr.getJSONObject(i).put("id", "preset"))
+            } catch (_: Exception) {
+                null
+            } ?: continue
+            out.add(combo)
+        }
+        return out
     }
 
     fun buttonToJson(b: ComboButton): JSONObject = JSONObject()
