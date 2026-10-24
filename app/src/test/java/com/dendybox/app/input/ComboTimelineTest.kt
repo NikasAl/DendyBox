@@ -99,20 +99,20 @@ class ComboTimelineTest {
     // ------------------------------------------------------------------
 
     @Test
-    fun `целевой сценарий — A держится 1000, B через 100 после нажатия A держится 1000`() {
+    fun `целевой сценарий — A держится 500, B через 50 после нажатия A держится 500`() {
         val events = ComboTimeline.timeline(
             listOf(
-                ComboStep("A", 0, holdMs = 1000),
-                ComboStep("B", 100, holdMs = 1000, fromPress = true)
+                ComboStep("A", 0, holdMs = 500),
+                ComboStep("B", 50, holdMs = 500, fromPress = true)
             )
         )
-        // События сортируются по времени: нажатие B (100) раньше отпускания A (1000)
+        // События сортируются по времени: нажатие B (50) раньше отпускания A (500)
         assertEquals(
             listOf(
                 ComboEvent(0, InputState.A, true),
-                ComboEvent(100, InputState.B, true),
-                ComboEvent(1000, InputState.A, false),
-                ComboEvent(1100, InputState.B, false)
+                ComboEvent(50, InputState.B, true),
+                ComboEvent(500, InputState.A, false),
+                ComboEvent(550, InputState.B, false)
             ),
             events
         )
@@ -134,22 +134,22 @@ class ComboTimelineTest {
 
     @Test
     fun `цепочка сдвигов по нажатию — каждый шаг от старта предыдущего`() {
-        // A: 0..1000; B: 100..1100 (от нажатия A); SELECT: 300..800 (от нажатия B +200)
+        // A: 0..500; B: 50..550 (от нажатия A); SELECT: 150..350 (от нажатия B +100)
         val events = ComboTimeline.timeline(
             listOf(
-                ComboStep("A", 0, holdMs = 1000),
-                ComboStep("B", 100, holdMs = 1000, fromPress = true),
-                ComboStep("SELECT", 200, holdMs = 500, fromPress = true)
+                ComboStep("A", 0, holdMs = 500),
+                ComboStep("B", 50, holdMs = 500, fromPress = true),
+                ComboStep("SELECT", 100, holdMs = 200, fromPress = true)
             )
         )
         assertEquals(
             listOf(
                 ComboEvent(0, InputState.A, true),
-                ComboEvent(100, InputState.B, true),
-                ComboEvent(300, InputState.SELECT, true),
-                ComboEvent(800, InputState.SELECT, false),
-                ComboEvent(1000, InputState.A, false),
-                ComboEvent(1100, InputState.B, false)
+                ComboEvent(50, InputState.B, true),
+                ComboEvent(150, InputState.SELECT, true),
+                ComboEvent(350, InputState.SELECT, false),
+                ComboEvent(500, InputState.A, false),
+                ComboEvent(550, InputState.B, false)
             ),
             events
         )
@@ -191,5 +191,30 @@ class ComboTimelineTest {
         assertThrows(IllegalArgumentException::class.java) {
             tl(ComboStep("A", 0, with = listOf("TURBO")))
         }
+    }
+
+    @Test
+    fun `сегменты шагов — старт и конец каждого набора на шкале`() {
+        val segs = ComboTimeline.segments(
+            listOf(
+                ComboStep("A", 0, holdMs = 500),
+                ComboStep("B", 50, with = listOf("RIGHT"), holdMs = 350, fromPress = true),
+                ComboStep("SELECT", 100, holdMs = 100)
+            )
+        )
+        // A: 0..500; B+RIGHT: 50..400 (от нажатия A); SELECT: 400+100=500..600
+        assertEquals(
+            listOf(
+                ComboSegment(0, listOf("A"), 0, 500),
+                ComboSegment(1, listOf("B", "RIGHT"), 50, 400),
+                ComboSegment(2, listOf("SELECT"), 500, 600)
+            ),
+            segs
+        )
+    }
+
+    @Test
+    fun `сегменты пустой последовательности пусты`() {
+        assertEquals(emptyList<ComboSegment>(), ComboTimeline.segments(emptyList()))
     }
 }

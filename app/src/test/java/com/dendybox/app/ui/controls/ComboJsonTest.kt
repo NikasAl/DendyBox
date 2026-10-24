@@ -39,7 +39,7 @@ class ComboJsonTest {
             [
               {"id":"ok","name":"Хорошая","steps":[{"b":"A","d":0}]},
               {"id":"bad-btn","name":"Нет такой кнопки","steps":[{"b":"TURBO","d":0}]},
-              {"id":"bad-delay","name":"Не кратна 100","steps":[{"b":"A","d":150}]},
+              {"id":"bad-delay","name":"Не кратна 50","steps":[{"b":"A","d":155}]},
               {"id":"neg","name":"Отрицательная","steps":[{"b":"A","d":-100}]},
               {"id":"no-steps","name":"Пустые шаги","steps":[]},
               {"name":"Без id","steps":[{"b":"A","d":0}]},
@@ -82,8 +82,8 @@ class ComboJsonTest {
             ComboButton(
                 "u1", "Сценарий",
                 listOf(
-                    ComboStep("A", 0, holdMs = 1000),
-                    ComboStep("B", 100, with = listOf("RIGHT"), holdMs = 500, fromPress = true)
+                    ComboStep("A", 0, holdMs = 500),
+                    ComboStep("B", 50, with = listOf("RIGHT"), holdMs = 350, fromPress = true)
                 )
             )
         )
@@ -110,12 +110,18 @@ class ComboJsonTest {
     }
 
     @Test
-    fun `границы удержания шага`() {
+    fun `границы удержания шага — сетка 50, кап 500`() {
+        assertTrue(ComboJson.validSteps(listOf(ComboStep("A", 0, holdMs = 50))))
         assertTrue(ComboJson.validSteps(listOf(ComboStep("A", 0, holdMs = 100))))
-        assertTrue(ComboJson.validSteps(listOf(ComboStep("A", 0, holdMs = 2000))))
-        assertFalse(ComboJson.validSteps(listOf(ComboStep("A", 0, holdMs = 50))))
-        assertFalse(ComboJson.validSteps(listOf(ComboStep("A", 0, holdMs = 150)))) // не кратно 100
-        assertFalse(ComboJson.validSteps(listOf(ComboStep("A", 0, holdMs = 2100)))) // больше макс
+        assertTrue(ComboJson.validSteps(listOf(ComboStep("A", 0, holdMs = 500))))
+        assertFalse(ComboJson.validSteps(listOf(ComboStep("A", 0, holdMs = 0))))
+        assertFalse(ComboJson.validSteps(listOf(ComboStep("A", 0, holdMs = 25)))) // не кратно 50
+        assertFalse(ComboJson.validSteps(listOf(ComboStep("A", 0, holdMs = 550)))) // выше капа
+        // Задержки тоже на сетке 50: старые сотни остаются валидными
+        assertTrue(ComboJson.validSteps(listOf(ComboStep("A", 50))))
+        assertTrue(ComboJson.validSteps(listOf(ComboStep("A", 150))))
+        assertFalse(ComboJson.validSteps(listOf(ComboStep("A", 25))))
+        assertFalse(ComboJson.validSteps(listOf(ComboStep("A", 550))))
     }
 
     @Test
@@ -128,17 +134,37 @@ class ComboJsonTest {
 
     @Test
     fun `битый hold роняет только свою запись`() {
-        val json = """[{"id":"bad-hold","name":"Х","steps":[{"b":"A","d":0,"h":150}]}]"""
+        // 175 — в диапазоне, но не кратен 50; 550 клэмпится к 500 (см. тест бэксосебисности)
+        val json = """[{"id":"bad-hold","name":"Х","steps":[{"b":"A","d":0,"h":175}]}]"""
         assertTrue(ComboJson.listFromJson(json).isEmpty())
+    }
+
+    @Test
+    fun `старые удержания выше 500 сжимаются до максимума, запись жива`() {
+        // Бэксосебисность: конфиги с h=1000..2000 читаются, но удержание сжато
+        assertEquals(
+            500,
+            ComboJson.stepFromJson(org.json.JSONObject("""{"b":"B","h":1000}"""))?.holdMs
+        )
+        assertEquals(
+            500,
+            ComboJson.stepFromJson(org.json.JSONObject("""{"b":"B","h":2000}"""))?.holdMs
+        )
+        // Запись с большим старым удержанием не выбрасывается из списка
+        val back = ComboJson.listFromJson(
+            """[{"id":"old","name":"Зарядка","steps":[{"b":"B","d":0,"h":1000}]}]"""
+        )
+        assertEquals(listOf("old"), back.map { it.id })
+        assertEquals(500, back.single().steps.single().holdMs)
     }
 
     @Test
     fun `опущенные d и неизвестный anchor читаются мягко`() {
         val s = ComboJson.stepFromJson(
-            org.json.JSONObject("""{"b":"B","h":1000,"anchor":"какой-то мусор"}""")
+            org.json.JSONObject("""{"b":"B","h":300,"anchor":"какой-то мусор"}""")
         )!!
         assertEquals(0, s.delayMs)
-        assertEquals(1000, s.holdMs)
+        assertEquals(300, s.holdMs)
         assertFalse(s.fromPress) // неизвестный anchor — прежний отсчёт от отпускания
     }
 
@@ -147,11 +173,11 @@ class ComboJsonTest {
         // Без новых полей сводка не изменилась
         assertEquals("A · B +100", ComboJson.stepsText(superHit.steps))
         assertEquals(
-            "A ×1000 · B +100 ×1000",
+            "A ×500 · B +50 ×500",
             ComboJson.stepsText(
                 listOf(
-                    ComboStep("A", 0, holdMs = 1000),
-                    ComboStep("B", 100, holdMs = 1000, fromPress = true)
+                    ComboStep("A", 0, holdMs = 500),
+                    ComboStep("B", 50, holdMs = 500, fromPress = true)
                 )
             )
         )

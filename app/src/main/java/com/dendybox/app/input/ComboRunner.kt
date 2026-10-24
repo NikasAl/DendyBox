@@ -14,6 +14,19 @@ import kotlinx.coroutines.launch
 data class ComboEvent(val tMs: Long, val bit: Int, val down: Boolean)
 
 /**
+ * Интервал одного шага на шкале времени: набор кнопок [buttons] зажат
+ * от [startMs] до [endMs]. Единый источник правды для исполнения
+ * ([ComboTimeline.timeline]) и наглядной хронологии в конфигураторе
+ * (полосы «старт + длительность»).
+ */
+data class ComboSegment(
+    val index: Int,
+    val buttons: List<String>,
+    val startMs: Long,
+    val endMs: Long
+)
+
+/**
  * Исполнитель программируемых комбо-кнопок: превращает последовательность
  * шагов в нажатия/отпускания через ТОТ ЖЕ путь ввода, что и физические
  * кнопки ([InputState.press] — эмулятор читает биты в первом же кадре).
@@ -23,8 +36,8 @@ data class ComboEvent(val tMs: Long, val bit: Int, val down: Boolean)
  * press-and-hold, а не повторные клики. Пауза шага отсчитывается от ОТПУСКАНИЯ
  * предыдущего шага (как раньше) или от его НАЖАТИЯ ([ComboStep.fromPress]) —
  * так шаги перекрываются во времени. «Суперудар» (A, пауза 100, B): A 0–100,
- * B 200–300. Перекрывающийся сценарий: A держится 1000 (0–1000); B со сдвигом
- * +100 от нажатия A и удержанием 1000 (100–1100).
+ * B 200–300. Перекрывающийся сценарий: A держится 500 (0–500); B со сдвигом
+ * +50 от нажатия A и удержанием 500 (50–550).
  *
  * Повторное нажатие комбо-кнопки ПЕРЕзапускает её последовательность с
  * начала. Отмена (уход с экрана, пауза) гарантированно отжимает все биты,
@@ -37,6 +50,33 @@ data class ComboEvent(val tMs: Long, val bit: Int, val down: Boolean)
 object ComboTimeline {
 
     /**
+     * Интервалы шагов: когда начинается каждый набор и сколько держится.
+     * Пауза первого шага — от нажатия комбо-кнопки; у остальных — от
+     * ОТПУСКАНИЯ предыдущего шага или от его НАЖАТИЯ ([ComboStep.fromPress]).
+     * Шаги могут перекрываться во времени (fromPress) — сегменты это
+     * показывают напрямую.
+     */
+    fun segments(steps: List<ComboStep>): List<ComboSegment> {
+        val out = ArrayList<ComboSegment>(steps.size)
+        var prevStart = 0L
+        var prevEnd = 0L
+        var first = true
+        steps.forEachIndexed { i, s ->
+            val start = when {
+                first -> s.delayMs.toLong()               // от нажатия комбо-кнопки
+                s.fromPress -> prevStart + s.delayMs      // от НАЖАТИЯ предыдущего шага
+                else -> prevEnd + s.delayMs               // от ОТПУСКАНИЯ предыдущего шага
+            }
+            val end = start + s.holdMs
+            out.add(ComboSegment(i, listOf(s.btn) + s.with, start, end))
+            prevStart = start
+            prevEnd = end
+            first = false
+        }
+        return out
+    }
+
+    /**
      * Таймлайн последовательности: точные моменты (мс) от нажатия комбо-кнопки,
      * ОТСОРТИРОВАННЫЕ по времени. Перекрывающиеся шаги (fromPress) порождают
      * события не по порядку генерации — стабильная сортировка выстраивает их
@@ -46,26 +86,12 @@ object ComboTimeline {
      */
     fun timeline(steps: List<ComboStep>): List<ComboEvent> {
         val events = ArrayList<ComboEvent>(steps.size * 2)
-        var prevStart = 0L
-        var prevEnd = 0L
-        var first = true
-        for (s in steps) {
-            val bits = (listOf(s.btn) + s.with).map { b ->
-                bitFor(b) ?: throw IllegalArgumentException("Кнопка не поддержана: $b")
+        for (seg in segments(steps)) {
+            for (b in seg.buttons) {
+                val bit = bitFor(b) ?: throw IllegalArgumentException("Кнопка не поддержана: $b")
+                events.add(ComboEvent(seg.startMs, bit, true))
+                events.add(ComboEvent(seg.endMs, bit, false))
             }
-            val start = when {
-                first -> s.delayMs.toLong()               // от нажатия комбо-кнопки
-                s.fromPress -> prevStart + s.delayMs      // от НАЖАТИЯ предыдущего шага
-                else -> prevEnd + s.delayMs               // от ОТПУСКАНИЯ предыдущего шага
-            }
-            val end = start + s.holdMs
-            for (b in bits) {
-                events.add(ComboEvent(start, b, true))
-                events.add(ComboEvent(end, b, false))
-            }
-            prevStart = start
-            prevEnd = end
-            first = false
         }
         return events.sortedBy { it.tMs }
     }

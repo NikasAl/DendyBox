@@ -18,7 +18,7 @@ import org.json.JSONObject
  *   перекрывающиеся удержания и сдвиги старта между кнопками. У первого
  *   шага пауза всегда считается от нажатия самой комбо-кнопки;
  * - [holdMs] — сколько мс набор держится нажатым (100 — прежнее поведение,
- *   «клик»); произвольные удержания — press-and-hold.
+ *   «клик»; сетка 50 мс, диапазон 50–500); press-and-hold.
  */
 data class ComboStep(
     val btn: String,
@@ -54,13 +54,15 @@ data class ComboButton(
  * ```json
  * [{"id":"u2","name":"Зажать A+B",
  *   "steps":[
- *     {"b":"A","d":0,"h":1000},                       // удержание 1000 мс
- *     {"b":"B","d":100,"h":1000,"anchor":"press"}     // +100 мс от НАЖАТИЯ A
+ *     {"b":"A","d":0,"h":500},                       // удержание 500 мс
+ *     {"b":"B","d":50,"h":350,"anchor":"press"}     // +50 мс от НАЖАТИЯ A
  *   ]}]
  * ```
  *   * `w`      — массив дополнительных кнопок: нажимаются одновременно
  *               с главной и отпускаются вместе с ней;
- *   * `h`      — удержание шага, мс (кратно 100, 100–2000; нет — 100);
+ *   * `h`      — удержание шага, мс (кратно 50, 50–500; нет — 100); старые
+ *               значения выше 500 при чтении сжимаются до 500 (запись
+ *               остаётся рабочей);
  *   * `anchor` — "press": пауза `d` отсчитывается от НАЖАТИЯ предыдущего
  *               шага, а не от его отпускания (перекрывающиеся удержания).
  * `d` теперь тоже опционален (нет — 0).
@@ -83,15 +85,18 @@ object ComboJson {
     /** Максимальное число шагов в одной комбо-кнопке. */
     const val MAX_STEPS = 12
 
-    /** Минимальный/максимальный шаг задержки (кратно 100), мс. */
+    /** Сетка времени: минимальный шаг любых задержек/удержаний, мс. */
+    const val GRID_MS = 50
+
+    /** Максимальный шаг задержки (кратно 50), мс. */
     const val MAX_DELAY_MS = 500
 
-    /** Длительность удержания шага (кратно 100), мс: по умолчанию/мин и макс. */
-    const val MIN_HOLD_MS = 100
-    const val MAX_HOLD_MS = 2000
-    const val DEFAULT_HOLD_MS = MIN_HOLD_MS
+    /** Удержание шага (кратно 50), мс: минимум, максимум и прежний «клик». */
+    const val MIN_HOLD_MS = 50
+    const val MAX_HOLD_MS = 500
+    const val DEFAULT_HOLD_MS = 100
 
-    /** Человеческая сводка последовательности: «A · B +100», «A ×1000 · B +100 ×1000». */
+    /** Человеческая сводка последовательности: «A · B +100», «A ×500 · B +50 ×350». */
     fun stepsText(steps: List<ComboStep>): String = steps.joinToString(" · ") {
         val btns = (listOf(it.btn) + it.with).joinToString("+") { b -> btnLabel(b) }
         val delay = if (it.delayMs > 0) " +${it.delayMs}" else ""
@@ -102,8 +107,8 @@ object ComboJson {
     fun validSteps(steps: List<ComboStep>): Boolean =
         steps.isNotEmpty() && steps.size <= MAX_STEPS &&
             steps.all { s ->
-                s.btn in BTN_KEYS && s.delayMs in 0..MAX_DELAY_MS && s.delayMs % 100 == 0 &&
-                    s.holdMs in MIN_HOLD_MS..MAX_HOLD_MS && s.holdMs % 100 == 0 &&
+                s.btn in BTN_KEYS && s.delayMs in 0..MAX_DELAY_MS && s.delayMs % GRID_MS == 0 &&
+                    s.holdMs in MIN_HOLD_MS..MAX_HOLD_MS && s.holdMs % GRID_MS == 0 &&
                     s.with.all { it in BTN_KEYS } &&
                     s.with.distinct().size == s.with.size &&
                     s.btn !in s.with
@@ -125,7 +130,9 @@ object ComboJson {
             btn = o.getString("b").trim().uppercase(),
             delayMs = o.optInt("d", 0),
             with = with,
-            holdMs = o.optInt("h", DEFAULT_HOLD_MS),
+            // Бэксосебисность: старые удержания до 2000 мс сжимаются до 500 —
+            // запись остаётся рабочей, а не выбрасывается
+            holdMs = o.optInt("h", DEFAULT_HOLD_MS).coerceIn(MIN_HOLD_MS, MAX_HOLD_MS),
             fromPress = o.optString("anchor", "").trim().lowercase() in ANCHOR_PRESS
         )
         if (validSteps(listOf(s))) s else null

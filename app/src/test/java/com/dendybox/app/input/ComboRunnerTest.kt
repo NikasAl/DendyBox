@@ -26,13 +26,13 @@ class ComboRunnerTest {
     fun `удержание — A зажата весь hold, B стартует со сдвигом и держится параллельно`() =
         runBlocking {
             InputState.clearAll()
-            // Целевой сценарий: A зажата 1000 мс; через 100 мс после нажатия A
-            // зажимается B и тоже держится 1000 мс
+            // Целевой сценарий: A зажата 500 мс; через 50 мс после нажатия A
+            // зажимается B и тоже держится 500 мс
             val btn = ComboButton(
                 "t", "Сценарий",
                 listOf(
-                    ComboStep("A", 0, holdMs = 1000),
-                    ComboStep("B", 100, holdMs = 1000, fromPress = true)
+                    ComboStep("A", 0, holdMs = 500),
+                    ComboStep("B", 50, holdMs = 500, fromPress = true)
                 )
             )
             var t = 0L
@@ -46,12 +46,12 @@ class ComboRunnerTest {
             assertEquals(4, samples.size)
             // t=0, перед нажатием A — порт пуст
             assertEquals(0L to 0, samples[0])
-            // t=100, перед нажатием B: A ВСЁ ЕЩЁ зажата — press-and-hold, а не клик
-            assertEquals(100L to InputState.A, samples[1])
-            // t=1000, перед отпусканием A: A и B зажаты одновременно
-            assertEquals(1000L to (InputState.A or InputState.B), samples[2])
-            // t=1100, перед отпусканием B: B пережила отпускание A
-            assertEquals(1100L to InputState.B, samples[3])
+            // t=50, перед нажатием B: A ВСЁ ЕЩЁ зажата — press-and-hold, а не клик
+            assertEquals(50L to InputState.A, samples[1])
+            // t=500, перед отпусканием A: A и B зажаты одновременно
+            assertEquals(500L to (InputState.A or InputState.B), samples[2])
+            // t=550, перед отпусканием B: B пережила отпускание A
+            assertEquals(550L to InputState.B, samples[3])
             // В конце ни одна кнопка не залипла
             assertEquals(0, InputState.raw(0))
         }
@@ -79,7 +79,7 @@ class ComboRunnerTest {
         InputState.clearAll()
         val btn = ComboButton(
             "t", "Долго",
-            listOf(ComboStep("A", 0, holdMs = 2000))
+            listOf(ComboStep("A", 0, holdMs = 500))
         )
         val job = launch { ComboRunner(this, { emptyList() }).play(btn, 0) }
         // Ждём фактического нажатия A (реальное время, поллинг)
