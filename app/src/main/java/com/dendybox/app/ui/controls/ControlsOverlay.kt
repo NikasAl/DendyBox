@@ -1,6 +1,7 @@
 package com.dendybox.app.ui.controls
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -39,7 +40,9 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
@@ -345,6 +348,12 @@ fun ControlsLayer(
         val parentPx = IntSize(constraints.maxWidth, constraints.maxHeight)
         val density = LocalDensity.current
 
+        // Скин (один на все группы). collectAsState — смена скина перекрашивает
+        // блоки без рестарта; геометрия/hit-test от скина НЕ зависят
+        val skin = ControlSkins.byId(SettingsStore.controlSkin.collectAsState().value)
+        // Слайдер «Видимость» двигает и картинку-подложку блока (imgBlock)
+        val opacity by SettingsStore.controlsOpacity.collectAsState()
+
         val groups = if (p2Style) {
             listOf(LayoutStore.GroupId.AB2)
         } else {
@@ -395,6 +404,25 @@ fun ControlsLayer(
             val tPx = with(density) { (e.top * g.scale).dp.toPx() }
             val rPx = with(density) { (e.right * g.scale).dp.toPx() }
             val bPx = with(density) { (e.bottom * g.scale).dp.toPx() }
+
+            // Подложка image-скина: одна картинка целым БЛОКОМ под всей группой
+            // (панель джойстика). Кнопки сверху сохраняют свой обычный рендер;
+            // подложка без pointerInput — зоны касаний не меняются
+            val blockImg = skin.imgBlock
+            if (blockImg != null) {
+                Image(
+                    painter = painterResource(blockImg),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    alpha = opacity,
+                    modifier = Modifier
+                        .offset { IntOffset((cx - lPx).toInt(), (cy - tPx).toInt()) }
+                        .size(
+                            with(density) { ((e.left + e.right) * g.scale).dp },
+                            with(density) { ((e.top + e.bottom) * g.scale).dp }
+                        )
+                )
+            }
 
             // Привязка группы к сырым касаниям (только в игровом режиме)
             if (!editing) {
@@ -552,6 +580,32 @@ private fun GameButton(
         else -> opacity
     }
 
+    // Картинка контрола или null — тогда параметрические форма/цвета.
+    // Разветвление ТОЛЬКО визуальное: размер, зона касаний и логика нажатий
+    // одинаковы (hit-test читает спеки, а не скин)
+    val imgRes = skin.buttonImage(spec.id)
+    val decoration = if (imgRes == null) {
+        Modifier
+            .clip(shape)
+            .background(skin.fill.copy(alpha = fillAlpha))
+            .border(
+                when {
+                    isTurbo -> 1.dp
+                    isCombo -> 1.5.dp
+                    else -> 2.dp
+                },
+                when {
+                    isTurbo -> skin.turboBorder.copy(alpha = alphas.borderTurbo)
+                    // комбо-кнопки отличаются рамкой (в классике — красной, как турбо)
+                    isCombo -> skin.comboBorder.copy(alpha = alphas.borderMain)
+                    else -> skin.border.copy(alpha = alphas.borderMain)
+                },
+                shape
+            )
+    } else {
+        Modifier // картинку рисует Image внутри — форма/цвета не применяются
+    }
+
     Box(
         modifier = Modifier
             .offset { IntOffset(xPx, yPx) }
@@ -585,24 +639,21 @@ private fun GameButton(
                     Modifier
                 }
             )
-            .clip(shape)
-            .background(skin.fill.copy(alpha = fillAlpha))
-            .border(
-                when {
-                    isTurbo -> 1.dp
-                    isCombo -> 1.5.dp
-                    else -> 2.dp
-                },
-                when {
-                    isTurbo -> skin.turboBorder.copy(alpha = alphas.borderTurbo)
-                    // комбо-кнопки отличаются рамкой (в классике — красной, как турбо)
-                    isCombo -> skin.comboBorder.copy(alpha = alphas.borderMain)
-                    else -> skin.border.copy(alpha = alphas.borderMain)
-                },
-                shape
-            ),
+            .then(decoration),
         contentAlignment = Alignment.Center
     ) {
+        if (imgRes != null) {
+            // Картинка скина: Fit — корректный aspect-ratio при любом размере
+            // контрола; альфа = слайдер «Видимость», нажатие подсвечивает
+            // картинку тем же бустом, что заливку обычной кнопки
+            Image(
+                painter = painterResource(imgRes),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                alpha = ControlSkin.buttonImageAlpha(opacity, pressed),
+                modifier = Modifier.fillMaxSize()
+            )
+        }
         Text(
             text = spec.label,
             color = skin.label.copy(alpha = alphas.label),
@@ -778,7 +829,23 @@ fun DpadLayer(
             )
         }
 
-        // Сама крестовина — рисуется ВСЕГДА
+        // Картинка крестовины (image-скин) — целым блоком: Fit сохраняет
+        // aspect-ratio, альфу двигает слайдер «Видимость» (вес крестовины).
+        // Сама картинка не перехватывает касания — зона прежняя
+        if (skin.imgDpad != null) {
+            Image(
+                painter = painterResource(skin.imgDpad),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                alpha = alphas.dpadStroke,
+                modifier = Modifier
+                    .offset { IntOffset((cx - rPx).toInt(), (cy - rPx).toInt()) }
+                    .size((rPx * 2f / density.density).dp)
+            )
+        }
+
+        // Поверх: прижатые направления (image-скин) или вся параметрическая
+        // крестовина (классика/неон/пиксель/тёмный)
         Canvas(Modifier.fillMaxSize()) {
             drawDpad(Offset(cx, cy), rPx, st.bits, alphas, skin)
         }
@@ -825,14 +892,48 @@ private fun angularDist(a: Double, b: Double): Double {
 /**
  * Отрисовка крестовины. Все альфы — из [a] ([ControlAlphas]): слайдер
  * «Видимость» управляет и крестовиной, а не только кнопками. Цвета и стиль
- * — из скина [skin]: «Классический/Неон/Тёмный» рисуют круг со стрелками,
- * «Пиксель» — цельный крест как на Dendy-геймпаде.
+ * — из скина [skin]: image-скин рисует только подсветку прижатых направлений
+ * (саму картинку выводит Image-слой в [DpadLayer]); «Классический/Неон/
+ * Тёмный» — круг со стрелками, «Пиксель» — цельный крест как на Dendy-геймпаде.
  */
 private fun DrawScope.drawDpad(center: Offset, r: Float, bits: Int, a: ControlAlphas, skin: ControlSkin) {
+    if (skin.imgDpad != null) {
+        drawDpadPressedArrows(center, r, bits, a, skin)
+        return
+    }
     when (skin.dpadVisual) {
         DpadVisual.TRIANGLES -> drawDpadTriangles(center, r, bits, a, skin)
         DpadVisual.CROSS -> drawDpadCross(center, r, bits, a, skin)
     }
+}
+
+/** Треугольная стрелка направления — общая для классики и подсветки image-скина. */
+private fun dpadArrowPath(center: Offset, r: Float, angle: Double): Path {
+    val rad = Math.toRadians(angle)
+    val dir = Offset(cos(rad).toFloat(), sin(rad).toFloat())
+    val perp = Offset(-dir.y, dir.x)
+    val tip = center + dir * (r * 0.95f)
+    val b1 = center + dir * (r * 0.52f) + perp * (r * 0.22f)
+    val b2 = center + dir * (r * 0.52f) - perp * (r * 0.22f)
+    return Path().apply {
+        moveTo(tip.x, tip.y)
+        lineTo(b1.x, b1.y)
+        lineTo(b2.x, b2.y)
+        close()
+    }
+}
+
+/**
+ * Подсветка нажатых направлений для image-крестовины: картинка статична,
+ * поэтому нажатие видно по активным стрелкам поверх неё (цвет —
+ * [ControlSkin.dpadArrowActive] скина, альфа — из слайдера).
+ */
+private fun DrawScope.drawDpadPressedArrows(center: Offset, r: Float, bits: Int, a: ControlAlphas, skin: ControlSkin) {
+    val active = skin.dpadArrowActive.copy(alpha = a.dpadArrowActive)
+    if (bits and InputState.RIGHT != 0) drawPath(dpadArrowPath(center, r, 0.0), active)
+    if (bits and InputState.DOWN != 0) drawPath(dpadArrowPath(center, r, 90.0), active)
+    if (bits and InputState.LEFT != 0) drawPath(dpadArrowPath(center, r, 180.0), active)
+    if (bits and InputState.UP != 0) drawPath(dpadArrowPath(center, r, 270.0), active)
 }
 
 /** Круг с треугольными стрелками — классический вид (цвета — из скина). */
@@ -841,20 +942,8 @@ private fun DrawScope.drawDpadTriangles(center: Offset, r: Float, bits: Int, a: 
     drawCircle(skin.dpadStroke.copy(alpha = a.dpadStroke), radius = r, center = center, style = Stroke(2.dp.toPx()))
 
     fun arrow(angle: Double, active: Boolean) {
-        val rad = Math.toRadians(angle)
-        val dir = Offset(cos(rad).toFloat(), sin(rad).toFloat())
-        val perp = Offset(-dir.y, dir.x)
-        val tip = center + dir * (r * 0.95f)
-        val b1 = center + dir * (r * 0.52f) + perp * (r * 0.22f)
-        val b2 = center + dir * (r * 0.52f) - perp * (r * 0.22f)
-        val path = Path().apply {
-            moveTo(tip.x, tip.y)
-            lineTo(b1.x, b1.y)
-            lineTo(b2.x, b2.y)
-            close()
-        }
         drawPath(
-            path,
+            dpadArrowPath(center, r, angle),
             if (active) skin.dpadArrowActive.copy(alpha = a.dpadArrowActive)
             else skin.dpadArrow.copy(alpha = a.dpadArrow)
         )

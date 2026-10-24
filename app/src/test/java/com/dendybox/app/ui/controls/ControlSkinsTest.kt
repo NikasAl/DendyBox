@@ -18,6 +18,8 @@ import org.junit.Test
  *  - скины визуально различаются (иначе выбор бессмыслен);
  *  - все базовые цвета полностью непрозрачны: прозрачность принадлежит
  *    [ControlAlphas] (слайдер «Видимость»), скин только красит.
+ *
+ * Image-скины (картинки из ресурсов) — в ControlImagesTest.
  */
 class ControlSkinsTest {
 
@@ -28,10 +30,10 @@ class ControlSkinsTest {
     // ------------------------------------------------------------------
 
     @Test
-    fun `в наборе четыре скина с уникальными идентификаторами`() {
-        assertEquals(4, ControlSkins.ALL.size)
-        assertEquals(4, ControlSkins.ALL.map { it.id }.toSet().size)
-        assertEquals(4, ControlSkins.ALL.map { it.title }.toSet().size)
+    fun `в наборе семь скинов с уникальными идентификаторами`() {
+        assertEquals(7, ControlSkins.ALL.size)
+        assertEquals(7, ControlSkins.ALL.map { it.id }.toSet().size)
+        assertEquals(7, ControlSkins.ALL.map { it.title }.toSet().size)
     }
 
     @Test

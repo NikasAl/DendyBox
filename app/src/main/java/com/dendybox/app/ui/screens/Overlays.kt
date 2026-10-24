@@ -64,6 +64,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.dendybox.app.saves.SaveManager
 import com.dendybox.app.settings.SettingsStore
@@ -487,15 +488,26 @@ private fun SettingSkinChips(
                     selected = selectedId == skin.id,
                     onClick = { onSelect(skin.id) },
                     label = { Text(skin.title) },
-                    // Мини-превью скина: заливка с его рамкой
+                    // Мини-превью скина: у image-скинов — картинка кнопки A,
+                    // у параметрических — заливка с его рамкой
                     leadingIcon = {
-                        Box(
-                            Modifier
-                                .size(14.dp)
-                                .clip(CircleShape)
-                                .background(skin.fill)
-                                .border(2.dp, skin.border, CircleShape)
-                        )
+                        val aImg = skin.buttonImage("A")
+                        if (aImg != null) {
+                            Image(
+                                painter = painterResource(aImg),
+                                contentDescription = null,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        } else {
+                            Box(
+                                Modifier
+                                    .size(14.dp)
+                                    .clip(CircleShape)
+                                    .background(skin.fill)
+                                    .border(2.dp, skin.border, CircleShape)
+                            )
+                        }
                     }
                 )
             }
