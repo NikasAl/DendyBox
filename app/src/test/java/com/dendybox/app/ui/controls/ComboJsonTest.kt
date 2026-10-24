@@ -72,6 +72,95 @@ class ComboJsonTest {
         assertFalse(ComboJson.validSteps(emptyList()))
     }
 
+    // ------------------------------------------------------------------
+    // Удержания и одновременность (новая модель шага)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `новые поля шага проходят круговорот json`() {
+        val src = listOf(
+            ComboButton(
+                "u1", "Сценарий",
+                listOf(
+                    ComboStep("A", 0, holdMs = 1000),
+                    ComboStep("B", 100, with = listOf("RIGHT"), holdMs = 500, fromPress = true)
+                )
+            )
+        )
+        assertEquals(src, ComboJson.listFromJson(ComboJson.listToJson(src)))
+    }
+
+    @Test
+    fun `старый json без новых полей даёт прежние значения и сериализуется без новых ключей`() {
+        val b = ComboJson.buttonFromJson(
+            org.json.JSONObject(
+                """{"id":"x","name":"Старая","steps":[{"b":"A","d":0},{"b":"B","d":100}]}"""
+            )
+        )!!
+        // Значения по умолчанию — прежнее поведение (клик 100 мс, без сдвигов)
+        assertEquals(listOf(ComboStep("A", 0), ComboStep("B", 100)), b.steps)
+        // Обратная сериализация не добавляет новых ключей — формат хранилища стабилен
+        val steps = ComboJson.buttonToJson(b).getJSONArray("steps")
+        assertEquals(2, steps.length())
+        for (i in 0 until steps.length()) {
+            val s = steps.getJSONObject(i)
+            assertEquals(2, s.length()) // только b и d
+            assertFalse(s.has("w")); assertFalse(s.has("h")); assertFalse(s.has("anchor"))
+        }
+    }
+
+    @Test
+    fun `границы удержания шага`() {
+        assertTrue(ComboJson.validSteps(listOf(ComboStep("A", 0, holdMs = 100))))
+        assertTrue(ComboJson.validSteps(listOf(ComboStep("A", 0, holdMs = 2000))))
+        assertFalse(ComboJson.validSteps(listOf(ComboStep("A", 0, holdMs = 50))))
+        assertFalse(ComboJson.validSteps(listOf(ComboStep("A", 0, holdMs = 150)))) // не кратно 100
+        assertFalse(ComboJson.validSteps(listOf(ComboStep("A", 0, holdMs = 2100)))) // больше макс
+    }
+
+    @Test
+    fun `валидация набора одновременных кнопок`() {
+        assertTrue(ComboJson.validSteps(listOf(ComboStep("A", 0, with = listOf("B", "RIGHT")))))
+        assertFalse(ComboJson.validSteps(listOf(ComboStep("A", 0, with = listOf("TURBO")))))
+        assertFalse(ComboJson.validSteps(listOf(ComboStep("A", 0, with = listOf("A"))))) // дубликат главной
+        assertFalse(ComboJson.validSteps(listOf(ComboStep("A", 0, with = listOf("B", "B"))))) // повтор
+    }
+
+    @Test
+    fun `битый hold роняет только свою запись`() {
+        val json = """[{"id":"bad-hold","name":"Х","steps":[{"b":"A","d":0,"h":150}]}]"""
+        assertTrue(ComboJson.listFromJson(json).isEmpty())
+    }
+
+    @Test
+    fun `опущенные d и неизвестный anchor читаются мягко`() {
+        val s = ComboJson.stepFromJson(
+            org.json.JSONObject("""{"b":"B","h":1000,"anchor":"какой-то мусор"}""")
+        )!!
+        assertEquals(0, s.delayMs)
+        assertEquals(1000, s.holdMs)
+        assertFalse(s.fromPress) // неизвестный anchor — прежний отсчёт от отпускания
+    }
+
+    @Test
+    fun `сводка показывает удержания и одновременность`() {
+        // Без новых полей сводка не изменилась
+        assertEquals("A · B +100", ComboJson.stepsText(superHit.steps))
+        assertEquals(
+            "A ×1000 · B +100 ×1000",
+            ComboJson.stepsText(
+                listOf(
+                    ComboStep("A", 0, holdMs = 1000),
+                    ComboStep("B", 100, holdMs = 1000, fromPress = true)
+                )
+            )
+        )
+        assertEquals(
+            "A+B ×500",
+            ComboJson.stepsText(listOf(ComboStep("A", 0, with = listOf("B"), holdMs = 500)))
+        )
+    }
+
     @Test
     fun `заглавные буквы кнопок приводятся к канону`() {
         val b = ComboJson.buttonFromJson(

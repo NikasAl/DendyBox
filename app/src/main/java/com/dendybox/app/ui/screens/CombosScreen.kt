@@ -41,7 +41,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.dendybox.app.settings.GameConfig
 import com.dendybox.app.ui.controls.ComboButton
@@ -54,10 +53,13 @@ import com.dendybox.app.ui.controls.ComboStore
  * (roms/<flavor>.json — только чтение) и пользовательские кнопки
  * (создание/редактирование/удаление, хранятся глобально — ComboStore).
  *
- * Шаг последовательности: кнопка джойстика (стрелки, A, B, START, SELECT)
- * и пауза 0–500 мс (кратно 100) после ОТПУСКАНИЯ предыдущей кнопки.
- * Открытие из меню паузы; сами кнопки лежат на игровой поверхности,
- * их позиция/масштаб — в редакторе управления (чип «Комбо-кнопки»).
+ * Шаг последовательности: набор кнопок джойстика (можно несколько —
+ * нажимаются ОДНОВРЕМЕННО), пауза 0–500 мс (кратно 100) перед началом шага
+ * и удержание 100–2000 мс (кратно 100). Пауза отсчитывается от отпускания
+ * предыдущего шага или — переключатель «Нажатия» — от его нажатия
+ * (перекрывающиеся удержания). Открытие из меню паузы; сами кнопки лежат
+ * на игровой поверхности, их позиция/масштаб — в редакторе управления
+ * (чип «Комбо-кнопки»). Старые конфиги без новых полей играются как раньше.
  */
 @Composable
 fun ComboPanel(onBack: () -> Unit) {
@@ -79,7 +81,7 @@ fun ComboPanel(onBack: () -> Unit) {
             Column(Modifier.weight(1f)) {
                 Text("Комбо-кнопки", style = MaterialTheme.typography.titleLarge)
                 Text(
-                    "Последовательность нажатий одной кнопкой",
+                    "Последовательности нажатий и удержаний",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -120,7 +122,8 @@ fun ComboPanel(onBack: () -> Unit) {
             if (mine.isEmpty()) {
                 Text(
                     "Пока нет своих кнопок. Нажмите «Новая»: задайте имя и шаги — " +
-                        "какую кнопку нажать и паузу после предыдущей.",
+                        "какие кнопки нажать (можно несколько сразу), сколько держать " +
+                        "и паузу перед шагом.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -198,6 +201,13 @@ private fun ComboCard(
 /** Доступные задержки шага, мс (шаг сетки 100). */
 private val DELAYS = listOf(0, 100, 200, 300, 400, 500)
 
+/** Доступные удержания шага, мс (шаг сетки 100; 100 — прежний «клик»). */
+private val HOLDS = (ComboJson.MIN_HOLD_MS / 100..ComboJson.MAX_HOLD_MS / 100).map { it * 100 }
+
+/** Подпись набора кнопок шага: «A+B», «↓». */
+private fun btnsLabel(s: ComboStep): String =
+    (listOf(s.btn) + s.with).joinToString("+") { ComboJson.btnLabel(it) }
+
 @Composable
 private fun ComboEditor(
     initial: ComboButton,
@@ -251,7 +261,7 @@ private fun ComboEditor(
                     Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                "Шаг ${i + 1}: ${ComboJson.btnLabel(s.btn)}",
+                                "Шаг ${i + 1}: ${btnsLabel(s)}",
                                 Modifier.weight(1f),
                                 style = MaterialTheme.typography.titleMedium
                             )
@@ -268,7 +278,38 @@ private fun ComboEditor(
                                 enabled = steps.size > 1
                             ) { Icon(Icons.Filled.Close, "Убрать шаг") }
                         }
-                        // Пауза ПОСЛЕ ОТПУСКАНИЯ предыдущей кнопки перед этой
+                        // Кнопки шага: мультивыбор — нажимаются одновременно
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.horizontalScroll(rememberScrollState())
+                        ) {
+                            ComboJson.BTN_KEYS.forEach { key ->
+                                val selected = key == s.btn || key in s.with
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = {
+                                        val cur = LinkedHashSet(listOf(s.btn) + s.with)
+                                        if (selected) {
+                                            if (cur.size > 1) { // хотя бы одна остаётся
+                                                cur.remove(key)
+                                                steps[i] = s.copy(btn = cur.first(), with = cur.drop(1).toList())
+                                            }
+                                        } else {
+                                            cur.add(key)
+                                            steps[i] = s.copy(btn = cur.first(), with = cur.drop(1).toList())
+                                        }
+                                    },
+                                    label = { Text(ComboJson.btnLabel(key)) },
+                                    modifier = Modifier.padding(end = 6.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            "Выбранные кнопки нажимаются и отпускаются одновременно",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        // Пауза перед началом шага
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.horizontalScroll(rememberScrollState())
@@ -288,6 +329,53 @@ private fun ComboEditor(
                                 )
                             }
                         }
+                        // Удержание: сколько мс набор держится нажатым
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.horizontalScroll(rememberScrollState())
+                        ) {
+                            Text(
+                                "Держать, мс",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.width(92.dp)
+                            )
+                            HOLDS.forEach { h ->
+                                FilterChip(
+                                    selected = s.holdMs == h,
+                                    onClick = { steps[i] = s.copy(holdMs = h) },
+                                    label = { Text("$h") },
+                                    modifier = Modifier.padding(end = 6.dp)
+                                )
+                            }
+                        }
+                        // Отсчёт паузы: от отпускания предыдущего шага (как раньше)
+                        // или от его нажатия — перекрывающиеся удержания
+                        if (i > 0) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.horizontalScroll(rememberScrollState())
+                            ) {
+                                Text(
+                                    "Пауза от",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.width(92.dp)
+                                )
+                                FilterChip(
+                                    selected = !s.fromPress,
+                                    onClick = { steps[i] = s.copy(fromPress = false) },
+                                    label = { Text("Отпускания") },
+                                    modifier = Modifier.padding(end = 6.dp)
+                                )
+                                FilterChip(
+                                    selected = s.fromPress,
+                                    onClick = { steps[i] = s.copy(fromPress = true) },
+                                    label = { Text("Нажатия") },
+                                    modifier = Modifier.padding(end = 6.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -299,12 +387,13 @@ private fun ComboEditor(
                         Text("Добавить шаг")
                     }
                 } else {
-                    // Выбор кнопки для нового шага
+                    // Выбор кнопок нового шага (можно несколько — нажмутся вместе)
+                    val picked = remember { mutableStateListOf<String>() }
                     Surface(shape = RoundedCornerShape(12.dp)) {
                         Column(Modifier.fillMaxWidth().padding(10.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    "Какая кнопка?",
+                                    "Какие кнопки?",
                                     Modifier.weight(1f),
                                     style = MaterialTheme.typography.titleSmall
                                 )
@@ -318,21 +407,32 @@ private fun ComboEditor(
                             ) {
                                 ComboJson.BTN_KEYS.forEach { key ->
                                     FilterChip(
-                                        selected = false,
+                                        selected = key in picked,
                                         onClick = {
-                                            steps.add(ComboStep(key, 0))
-                                            pickStep = null
+                                            if (key in picked) picked.remove(key) else picked.add(key)
                                         },
                                         label = { Text(ComboJson.btnLabel(key)) }
                                     )
                                 }
                             }
-                            Text(
-                                "Пауза нового шага — 0 мс, поменяйте ниже",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(top = 6.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        steps.add(ComboStep(picked.first(), 0, with = picked.drop(1)))
+                                        pickStep = null
+                                    },
+                                    enabled = picked.isNotEmpty()
+                                ) { Text("Добавить шаг") }
+                                Text(
+                                    "несколько — нажмутся вместе",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 10.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -346,9 +446,12 @@ private fun ComboEditor(
 
             Spacer(Modifier.width(1.dp))
             Text(
-                "Как играется: нажать кнопку комбо → по очереди нажимаются-отпускаются " +
-                    "выбранные кнопки; каждая держится 100 мс, пауза между ними — из шагов. " +
-                    "Пример «Суперудар»: A, пауза 100 мс, B.",
+                "Как играется: кнопки шага нажимаются одновременно и держатся " +
+                    "указанное время (по умолчанию 100 мс). Пауза шага отсчитывается " +
+                    "от отпускания предыдущего или — переключатель «Нажатия» — от его " +
+                    "нажатия: так задаются удержания с перекрытием. Пример: A держится " +
+                    "1000 мс; B начинается через 100 мс после нажатия A и держится ещё " +
+                    "1000 мс.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
