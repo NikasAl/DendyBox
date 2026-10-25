@@ -207,10 +207,29 @@ object ComboJson {
 }
 
 /**
- * Хранилище ПОЛЬЗОВАТЕЛЬСКИХ комбо-кнопок (глобальный набор, все игры) —
+ * Хранилище ПОЛЬЗОВАТЕЛЬСКИХ комбо-кнопок, разбитое на СЕКЦИИ ПО ИГРЕ —
  * по образцу [SettingsStore]: SharedPreferences + зеркальное Compose-состояние.
  * Пресеты конкретной игры живут в GameConfig (roms/<flavor>.json) и
  * подмешиваются в [effective].
+ *
+ * Свои кнопки привязаны к игре, как и пресеты сборника: кнопки, созданные
+ * при активной игре X сборника, хранятся в секции X и показываются/играют
+ * только в ней — при переключении игры (MainActivity → [selectRom]) набор
+ * меняется вместе с пресетами. Для одиночной игры (flavor без сборника)
+ * кнопки лежат в общей секции [FLAVOR_KEY] — поведение прежних версий.
+ * Секции не смешиваются: у каждой игры свой набор.
+ *
+ * Ключ секции рома — название игры из манифеста сборника (title из
+ * roms/games.json): устойчиво к перестановке/удалению игр, в отличие от
+ * индекса и имени файла. Две записи с одинаковым названием разделят секцию.
+ *
+ * Формат prefs (ключ `combos_v2`):
+ * ```json
+ * {"flavor": [ ...кнопки одиночной игры... ],
+ *  "roms": { "ТМНТ": [ ...кнопки этой игры... ] }}
+ * ```
+ * Первая версия хранила один общий массив (`combos_v1`) — при первом запуске
+ * он переносится в секцию [FLAVOR_KEY] (то же поведение «свои кнопки везде»).
  *
  * Кнопки рисуются на игровой поверхности отдельной группой
  * (LayoutStore.GroupId.COMBO — позиция/масштаб блока в редакторе раскладки);
@@ -218,22 +237,57 @@ object ComboJson {
  * через GamepadInput).
  */
 object ComboStore {
-    private const val PREF_KEY = "combos_v1"
+    private const val PREF_KEY = "combos_v2"
+    private const val PREF_KEY_V1 = "combos_v1"
+
+    /** Ключ секции вне сборника: одиночная игра flavor'а (и меню сборника). */
+    internal const val FLAVOR_KEY = "flavor"
+
     private lateinit var prefs: SharedPreferences
 
-    /** Пользовательские кнопки (без пресетов игры). */
-    var buttons: List<ComboButton> by mutableStateOf(emptyList())
+    /** Все секции своих кнопок; пустые секции не хранятся. */
+    private var sections: Map<String, List<ComboButton>> by mutableStateOf(emptyMap())
+
+    /** Ключ активной секции: null — flavor (одиночная игра или меню сборника). */
+    var activeSection: String? by mutableStateOf(null)
         private set
+
+    /**
+     * Свои кнопки АКТИВНОЙ секции: активной игры сборника либо flavor'а
+     * (одиночная игра). Реактивно — при [selectRom] конфигуратор и блок
+     * комбо-кнопок на поверхности обновляются сами.
+     */
+    val buttons: List<ComboButton>
+        get() = sections[activeSection ?: FLAVOR_KEY] ?: emptyList()
 
     fun init(ctx: Context) {
         if (this::prefs.isInitialized) return
         prefs = ctx.getSharedPreferences("combos", Context.MODE_PRIVATE)
-        buttons = ComboJson.listFromJson(prefs.getString(PREF_KEY, null) ?: "[]")
+        val v2 = prefs.getString(PREF_KEY, null)
+        sections = if (v2 != null) {
+            parseSections(v2)
+        } else {
+            // Миграция первой версии (общий массив): все свои кнопки
+            // переезжают в секцию flavor — прежнее поведение «видны везде»
+            parseSections(prefs.getString(PREF_KEY_V1, null))
+                .also { if (it.isNotEmpty()) persist() }
+        }
+        selectRom(null)
+    }
+
+    /**
+     * Загружен ром сборника: активировать секцию своих кнопок этой игры
+     * ([romKey] — название игры из манифеста; null — flavor: одиночная игра
+     * или меню сборника). Вызывается из MainActivity рядом с
+     * GameConfig.selectRom — свои кнопки и пресеты переключаются синхронно.
+     */
+    fun selectRom(romKey: String?) {
+        activeSection = romKey
     }
 
     /**
      * Кнопки на игровой поверхности: пресеты из конфига игры (id «p0», «p1»…,
-     * только чтение) + пользовательские кнопки, БЕЗ отключённых (см.
+     * только чтение) + свои кнопки активной секции, БЕЗ отключённых (см.
      * [disabledProvider]). Пресеты идут первыми — это «главные» приёмы игры.
      * Конфигуратор (CombosScreen) показывает полный список, включая
      * отключённые — там кнопка включается обратно.
@@ -256,7 +310,8 @@ object ComboStore {
     /**
      * Стабильный ключ отключения кнопки (хранится в конфиге раскладки):
      *   * свои кнопки — по id («u:…»): id выдаёт [newId] один раз и
-     *     переживает переименование;
+     *     переживает переименование; id уникален во ВСЕХ секциях, так что
+     *     ключ не конфликтует между играми сборника;
      *   * пресеты — по имени («pres:…»): id «p0…» назначается по индексу
      *     и меняется при переключении ROM сборника, имя задаёт картридж.
      * Отключение прячет кнопку с поверхности, но определение (у [ComboStore]
@@ -269,32 +324,107 @@ object ComboStore {
     fun withoutDisabled(all: List<ComboButton>, off: Set<String>): List<ComboButton> =
         all.filter { disabledKey(it) !in off }
 
-    /** Уникальный id новой пользовательской кнопки. */
-    fun newId(): String {
-        val base = "u" + java.lang.Long.toString(System.currentTimeMillis(), 36)
+    /** Уникальный id новой пользовательской кнопки — во всех секциях сразу. */
+    fun newId(): String =
+        uniqueId("u" + java.lang.Long.toString(System.currentTimeMillis(), 36))
+
+    /** Свободный id с базой [base]: конфликт проверяется по ВСЕМ секциям. */
+    internal fun uniqueId(base: String): String {
         var id = base
         var n = 1
-        while (buttons.any { it.id == id }) id = base + "_" + (n++)
+        while (sections.values.any { list -> list.any { it.id == id } }) id = base + "_" + (n++)
         return id
     }
 
+    /** Новая кнопка — в активную секцию (текущая игра сборника либо flavor). */
     fun add(b: ComboButton) {
-        buttons = buttons + b
+        val key = activeSection ?: FLAVOR_KEY
+        sections = sections + (key to (sections[key] ?: emptyList()) + b)
         persist()
     }
 
+    /** Изменение кнопки активной секции; секции без кнопок не создаёт. */
     fun update(b: ComboButton) {
-        buttons = buttons.map { if (it.id == b.id) b else it }
+        val key = activeSection ?: FLAVOR_KEY
+        val list = sections[key] ?: return
+        sections = sections + (key to list.map { if (it.id == b.id) b else it })
         persist()
     }
 
+    /** Удаление кнопки из активной секции; опустевшая секция убирается. */
     fun remove(id: String) {
-        buttons = buttons.filterNot { it.id == id }
+        val key = activeSection ?: FLAVOR_KEY
+        val list = sections[key] ?: return
+        val next = list.filterNot { it.id == id }
+        sections = if (next.isEmpty()) sections - key else sections + (key to next)
         persist()
     }
+
+    /**
+     * Разбор конфига секций: объект `{"flavor":[…],"roms":{"X":[…]}}`;
+     * старый формат (плоский массив `combos_v1`) читается как секция flavor.
+     * Битые кнопки изолируются по элементу (ComboJson.listFromJson), пустые
+     * секции не попадают в результат; мусор — пустая карта, без исключений.
+     */
+    internal fun parseSections(text: String?): Map<String, List<ComboButton>> {
+        val trimmed = text?.trim().orEmpty()
+        if (trimmed.isEmpty()) return emptyMap()
+        return try {
+            if (trimmed.startsWith("[")) {
+                // старый формат v1: один общий список → секция flavor
+                mapOfFlavor(ComboJson.listFromJson(trimmed))
+            } else {
+                val root = JSONObject(trimmed)
+                val out = HashMap<String, List<ComboButton>>()
+                mapOfFlavor(ComboJson.listFromJson(root.optJSONArray("flavor")?.toString() ?: "[]"))
+                    .let { out.putAll(it) }
+                val roms = root.optJSONObject("roms")
+                if (roms != null) {
+                    roms.keys().forEach { key ->
+                        val list = ComboJson.listFromJson(roms.optJSONArray(key)?.toString() ?: "[]")
+                        if (list.isNotEmpty()) out[key] = list
+                    }
+                }
+                out
+            }
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun mapOfFlavor(list: List<ComboButton>): Map<String, List<ComboButton>> =
+        if (list.isEmpty()) emptyMap() else mapOf(FLAVOR_KEY to list)
+
+    /** Конфиг секций в JSON prefs ([PREF_KEY]); пустые секции не пишутся. */
+    internal fun sectionsToJson(map: Map<String, List<ComboButton>>): String {
+        val root = JSONObject()
+        val flavor = JSONArray()
+        map[FLAVOR_KEY]?.forEach { flavor.put(ComboJson.buttonToJson(it)) }
+        if (flavor.length() > 0) root.put("flavor", flavor)
+        val roms = JSONObject()
+        map.entries
+            .filter { it.key != FLAVOR_KEY && it.value.isNotEmpty() }
+            .forEach { (key, list) ->
+                roms.put(key, JSONArray().apply { list.forEach { put(ComboJson.buttonToJson(it)) } })
+            }
+        if (roms.length() > 0) root.put("roms", roms)
+        return root.toString()
+    }
+
+    /** Подмена состояния целиком (юнит-тесты); активная секция — [active]. */
+    internal fun applySections(
+        map: Map<String, List<ComboButton>>,
+        active: String? = null
+    ) {
+        sections = map
+        activeSection = active
+    }
+
+    /** Снимок секций для проверок в юнит-тестах. */
+    internal fun sectionsSnapshot(): Map<String, List<ComboButton>> = sections
 
     private fun persist() {
         if (!this::prefs.isInitialized) return
-        prefs.edit().putString(PREF_KEY, ComboJson.listToJson(buttons)).apply()
+        prefs.edit().putString(PREF_KEY, sectionsToJson(sections)).apply()
     }
 }

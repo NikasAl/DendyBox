@@ -45,6 +45,7 @@ import com.dendybox.app.settings.CollectionCatalog
 import com.dendybox.app.settings.GameConfig
 import com.dendybox.app.settings.SettingsStore
 import com.dendybox.app.ui.DendyBoxTheme
+import com.dendybox.app.ui.controls.ComboStore
 import com.dendybox.app.ui.screens.CollectionMenu
 import com.dendybox.app.ui.screens.GameScreen
 import com.dendybox.app.ui.screens.Screen
@@ -110,9 +111,9 @@ class MainActivity : ComponentActivity() {
 private fun AppRoot() {
     val context = LocalContext.current
     SettingsStore.init(context)
-    // Хранилище пользовательских комбо-кнопок (глобальное; пресеты игры —
-    // в GameConfig из roms/<flavor>.json)
-    com.dendybox.app.ui.controls.ComboStore.init(context)
+    // Хранилище СВОИХ комбо-кнопок (секции по играм сборника; пресеты —
+    // в GameConfig из roms/<flavor>.json / roms/games.json)
+    ComboStore.init(context)
     // Конфиг игры (roms/<flavor>.json → assets/game.json): байт урона для
     // вибрации при уроне и видимость сетевого режима. Файл опционален;
     // читается один раз, до старта движка
@@ -173,11 +174,15 @@ private fun AppRoot() {
     // ROM: одиночная игра — assets/rom.nes; сборник — выбранная игра из
     // assets/games/. Повторный start после stop безопасен: Native.unload
     // полностью деинициализирует ядро, сейвы привязаны к SHA-1 нового рома.
-    // Здесь же активируются пресеты комбо выбранного рома: при переключении
-    // игры сборника набор комбо-кнопок меняется (GameConfig.selectRom)
+    // Здесь же активируются пресеты комбо и секция СВОИХ комбо-кнопок
+    // выбранного рома: при переключении игры сборника набор комбо-кнопок
+    // меняется (GameConfig.selectRom + ComboStore.selectRom)
     LaunchedEffect(selectedGame) {
         val entry = collection?.games?.getOrNull(selectedGame)
         GameConfig.selectRom(entry?.combos, entry?.title)
+        // Свои кнопки привязаны к игре сборника, как пресеты: секция по
+        // названию игры; одиночная игра и меню сборника — общая секция flavor
+        ComboStore.selectRom(entry?.title)
         if (collection != null && selectedGame < 0) {
             romBytes = null // показано меню сборника — ром не нужен
             return@LaunchedEffect

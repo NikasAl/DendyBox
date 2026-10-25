@@ -24,6 +24,9 @@ class ComboToggleTest {
     fun tearDown() {
         ComboStore.disabledProvider = { emptySet() }
         GameConfig.applyParsed(GameConfig.Parsed(true, emptyList(), null))
+        // секции своих кнопок тоже сбрасываем — состояние объектов общее
+        // для всего класса тестов
+        ComboStore.applySections(emptyMap())
     }
 
     // ------------------------------------------------------------------
