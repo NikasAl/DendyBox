@@ -52,20 +52,24 @@
       { "file": "t_tmnt2.nes",            "title": "Черепашки Ниндзя II",
         "combos": [
           { "name": "Суперудар", "steps": [ { "b": "A", "d": 0, "w": ["B"] } ] },
-          { "name": "Рывок-удар", "steps": [
-            { "b": "RIGHT", "d": 0 },
-            { "b": "RIGHT", "d": 0 },
-            { "b": "B", "d": 0 }
+          { "name": "Прыжок-удар", "steps": [
+            { "b": "RIGHT", "d": 0, "h": 400 },
+            { "b": "A", "d": 0, "h": 150, "anchor": "press" },
+            { "b": "B", "d": 150, "h": 100, "anchor": "press" }
           ] }
         ]
       },
       { "file": "t_tmnt3.nes",            "title": "Черепашки Ниндзя III",
         "combos": [
           { "name": "Суперудар", "steps": [ { "b": "A", "d": 0, "w": ["B"] } ] },
-          { "name": "Рывок-удар", "steps": [
-            { "b": "RIGHT", "d": 0 },
-            { "b": "RIGHT", "d": 0 },
-            { "b": "B", "d": 0 }
+          { "name": "Прыжок-удар", "steps": [
+            { "b": "RIGHT", "d": 0, "h": 400 },
+            { "b": "A", "d": 0, "h": 150, "anchor": "press" },
+            { "b": "B", "d": 150, "h": 100, "anchor": "press" }
+          ] },
+          { "name": "Бросок", "steps": [
+            { "b": "DOWN", "d": 0, "h": 250 },
+            { "b": "B", "d": 0, "h": 100, "anchor": "press" }
           ] }
         ]
       },

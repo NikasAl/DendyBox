@@ -274,9 +274,84 @@ Hex/Memory viewer), можно включить вибрацию телефон�
 с понятной ошибкой, шаги с неизвестными кнопками тоже).
 
 Живой пример — `roms/games.json`: у сборника «Черепашки Ниндзя» у каждой
-игры свои приёмы («Прыжок-удар» из TMNT, «Суперудар» A+B и «Рывок-удар»
-→→B из TMNT II/III, десять пресетов из Tournament Fighters — см. ниже),
-у сборника «Контра» — «Автоогонь» (удержание B) для каждой из трёх игр.
+игры свои приёмы («Прыжок-удар» из TMNT; «Суперудар» и «Прыжок-удар»
+из TMNT II; «Суперудар», «Прыжок-удар» и «Бросок» из TMNT III; десять
+пресетов из Tournament Fighters — см. ниже), у сборника «Контра» —
+«Автоогонь» (удержание B) для каждой из трёх игр.
+
+#### Пресеты TMNT II и TMNT III (NES) — по справочникам
+
+Пресеты «Черепашки Ниндзя II» и «… III» собраны по независимым
+источникам (вводы сходятся):
+
+1. Официальный мануал TMNT II (Ultra Software, 1990; OCR-скан
+   archive.org, «Teenage Mutant Ninja Turtles II — The Arcade Game
+   [NES-2N-USA]», раздел «Controlling Your Turtle»): **A = прыжок,
+   B = атака**; «To jump and attack at the same time, carefully press
+   the A Button and B Button simultaneously»; прыжок-удар — «press the
+   A Button, then the B Button while pressing the Control Pad Left or
+   Right»; энергия тратится только «each time you're wounded by an
+   enemy»; разбегов/рывков в мануале нет.
+2. GameFAQs, FAQ 7055 по TMNT II (процитирован в поисковой выдаче
+   GameFAQs — полная страница закрыта антиботом): «If you can do the
+   Special Attack (**A and B
+   together**), you will have no problems beating this game», спец
+   «destroys all Foot Soldiers in a single hit» и «should be used in
+   all situations» (платы здоровья нет); всего три атаки (обычная,
+   прыжок-удар, спец) — рывков нет; прыжок-удар несёт черепаху через
+   экран (идёт с зажатым направлением).
+3. Wikipedia, «TMNT III: The Manhattan Project» (геймплей): спецприём —
+   «pressing B and A simultaneously… a portion of their energy will be
+   lost, unless they are on their last bar of life»; тосс-атака —
+   «holding the D-pad downwards while pressing B»; управление
+   «mostly unchanged from the second NES game».
+4. StrategyWiki, «TMNT III / Gameplay» (Combat): Special Attack — обе
+   кнопки строго одновременно, снимает 1 полосу из 16 (на последней
+   полосе — бесплатно); Throw «throws enemies back», некоторым врагам
+   не работает, урон больше обычной атаки; в воздухе — diving jump
+   kick.
+5. ConsoleDatabase (cheats/nes/teenagemutantninjaturtles3) + GameFAQs
+   FAQ 3110 + SPOnG «Replay» (2010): спецприём TMNT III называется
+   «Tubular Turbo Attack» (A+B одновременно); по черепахам: Лео —
+   Cyclone Sword Spin, Дон — Knockout Roll, Майки — Kangaroo Kick,
+   Раф — Power Drill Attack.
+
+Пресеты (для движения ВПРАВО; влево — отредактируйте шаги RIGHT→LEFT
+в своей кнопке):
+
+| Кнопка | Приём | Ввод по источникам | Пресет |
+|---|---|---|---|
+| TMNT II «Суперудар» | Special Attack (все черепахи) | A+B одновременно | A+B в один кадр (`w`) |
+| TMNT II «Прыжок-удар» | Jump Kick | A, затем B при зажатом ←/→ (мануал) | RIGHT 400 мс, A в него же, B на 150-м мс |
+| TMNT III «Суперудар» | Tubular Turbo Attack (−1/16 полосы) | A+B одновременно | A+B в один кадр (`w`) |
+| TMNT III «Прыжок-удар» | Diving Jump Kick | A, затем B в воздухе (с ←/→) | как у TMNT II |
+| TMNT III «Бросок» | Toss/Throw | зажать ↓, нажать B | DOWN 250 мс, B внутри |
+
+Отмеченные допущения (источник требует иное — приведено к ближайшему
+валидному):
+
+* **Тайминги в источниках не публикуются** (фреймдаты NES-версий нет) —
+  ритмы реконструированы под сетку 50 мс: 150 мс от прыжка до удара
+  ≈ 9 кадров NES (черепаха уже в воздухе), RIGHT держится 400 мс —
+  накрывает весь прыжок с ударом (по FAQ 7055 прыжок-удар «несёт через
+  экран»), DOWN в броске — 250 мс с B внутри удержания.
+* **«Одновременно» = один кадр**: шаг с `w` зажимает A и B в один и тот
+  же мс. Разнесённые тапы здесь опасны: по мануалу TMNT II «A, затем B»
+  — это уже прыжок-удар, а не спецприём (в Tournament Fighters,
+  наоборот, «A чуть раньше B» давало спец с доп. прыжком — тут границы
+  строже).
+* **Рывков в обеих играх НЕТ** — прежний пресет «Рывок-удар» (→→B)
+  удалён как несуществующий приём: по FAQ 7055 у черепах только три
+  атаки, Wikipedia подтверждает «mostly unchanged» в TMNT III. Ключ
+  отключения «Рывок-удар» становится дремлющим — это штатно.
+* **Спецприём TMNT II бесплатен** (в отличие от аркады и TMNT III):
+  мануал списывает трату энергии только на ранения, FAQ 7055 советует
+  спец «in all situations». В TMNT III спец снимает 1/16 полосы жизни
+  (на последней полосе — бесплатно, StrategyWiki/Wikipedia).
+* **«Бросок» требует врага рядом**: без врага в зоне ввод просто ничего
+  не делает; некоторым врагам не работает вовсе, зато по StrategyWiki
+  урон больше обычной атаки. Броски TMNT II (схватить вплотную, затем
+  B) — позиционно-зависимы, в пресеты не включены.
 
 #### Пресеты «Tournament Fighters» (NES) — по справочникам
 
