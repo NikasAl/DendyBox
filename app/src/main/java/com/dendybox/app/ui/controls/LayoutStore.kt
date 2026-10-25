@@ -22,6 +22,13 @@ import androidx.compose.runtime.setValue
  * (Screen.EDIT). [Group.x]/[Group.y] — якорь группы (центр) в долях экрана,
  * [Group.scale] — масштаб всех элементов группы (1.0 = базовые dp-размеры).
  *
+ * Кроме групп конфиг хранит ключи ОТКЛЮЧЁННЫХ комбо-кнопок ([combosOff]):
+ * кнопка с таким ключом не рисуется и не активна на игровой поверхности,
+ * но её определение сохраняется (у ComboStore/пресетов) — включение
+ * возвращает её на место. Ключи считает [ComboStore.disabledKey]: свои
+ * кнопки — по id (стабилен при переименовании), пресеты — по имени
+ * (id «p0…» назначается по индексу и меняется при переключении ROM).
+ *
  * Хранится в SharedPreferences под ключом layout_v3 (при смене модели
  * раскладки старые сохранённые позиции несовместимы — сбрасываются).
  */
@@ -44,11 +51,17 @@ class LayoutStore(private val prefs: SharedPreferences) {
     var combo: Group by mutableStateOf(DEF_COMBO)
         private set
 
+    /** Ключи отключённых комбо-кнопок (см. [ComboStore.disabledKey]). */
+    var combosOff: Set<String> by mutableStateOf(emptySet())
+        private set
+
     init {
         val raw = prefs.getString(PREF_KEY, null)
         if (raw != null) {
             try {
                 val o = org.json.JSONObject(raw)
+                // Раздел появился позже раскладки v3 — отсутствие не ошибка
+                combosOff = readCombosOff(o)
                 fun read(k: String, def: Group): Group {
                     val g = o.optJSONObject(k) ?: return def
                     return try {
@@ -110,6 +123,8 @@ class LayoutStore(private val prefs: SharedPreferences) {
             .put("x", g.x.toDouble())
             .put("y", g.y.toDouble())
             .put("s", g.scale.toDouble())
+        val off = org.json.JSONArray()
+        combosOff.sorted().forEach { off.put(it) }
         return org.json.JSONObject()
             .put("dpad", j(dpad))
             .put("ab", j(ab))
@@ -117,6 +132,7 @@ class LayoutStore(private val prefs: SharedPreferences) {
             .put("dpad2", j(dpad2))
             .put("ab2", j(ab2))
             .put("combo", j(combo))
+            .put("combosOff", off)
             .toString()
     }
 
@@ -150,11 +166,17 @@ class LayoutStore(private val prefs: SharedPreferences) {
         read("dpad2")?.let { dpad2 = sanitize(it) }
         read("ab2")?.let { ab2 = sanitize(it) }
         read("combo")?.let { combo = sanitize(it) }
+        // отключённые комбо тоже необязательны: старый экспорт без них
+        // означает «все включены» — импорт заменяет состояние целиком
+        combosOff = readCombosOff(o)
         persist()
         return true
     }
 
-    /** Вернуть все группы к заводской раскладке. */
+    /**
+     * Вернуть все группы к заводской раскладке. Отключённые комбо-кнопки
+     * тоже сбрасываются (заводское состояние — все включены).
+     */
     fun resetAll() {
         dpad = DEF_DPAD
         ab = DEF_AB
@@ -162,7 +184,33 @@ class LayoutStore(private val prefs: SharedPreferences) {
         dpad2 = DEF_DPAD2
         ab2 = DEF_AB2
         combo = DEF_COMBO
+        combosOff = emptySet()
         persist()
+    }
+
+    /**
+     * Включить/выключить комбо-кнопку с ключом [key] (см.
+     * [ComboStore.disabledKey]): выключенная не рисуется и не активна
+     * на игровой поверхности, определение кнопки не трогается.
+     */
+    fun setComboEnabled(key: String, enabled: Boolean) {
+        val next = if (enabled) combosOff - key else combosOff + key
+        if (next == combosOff) return
+        combosOff = next
+        persist()
+    }
+
+    /** Кнопка с ключом [key] показывается на игровой поверхности? */
+    fun isComboEnabled(key: String): Boolean = key !in combosOff
+
+    /** Раздел «combosOff» конфига: массив строк; нет/битый — пустой набор. */
+    private fun readCombosOff(o: org.json.JSONObject): Set<String> = try {
+        val arr = o.getJSONArray("combosOff")
+        (0 until arr.length()).mapNotNull { i ->
+            arr.optString(i).takeUnless { it.isEmpty() }
+        }.toSet()
+    } catch (_: Exception) {
+        emptySet()
     }
 
     private fun sanitize(g: Group) = Group(

@@ -232,14 +232,42 @@ object ComboStore {
     }
 
     /**
-     * Полный набор для текущей игры: пресеты из конфига игры (id «p0», «p1»…,
-     * только чтение) + пользовательские кнопки. Пресеты идут первыми — это
-     * «главные» приёмы игры.
+     * Кнопки на игровой поверхности: пресеты из конфига игры (id «p0», «p1»…,
+     * только чтение) + пользовательские кнопки, БЕЗ отключённых (см.
+     * [disabledProvider]). Пресеты идут первыми — это «главные» приёмы игры.
+     * Конфигуратор (CombosScreen) показывает полный список, включая
+     * отключённые — там кнопка включается обратно.
      */
     fun effective(): List<ComboButton> =
-        com.dendybox.app.settings.GameConfig.comboPresets.mapIndexed { i, c ->
-            c.copy(id = "p$i")
-        } + buttons
+        withoutDisabled(
+            com.dendybox.app.settings.GameConfig.comboPresets.mapIndexed { i, c ->
+                c.copy(id = "p$i")
+            } + buttons,
+            disabledProvider()
+        )
+
+    /**
+     * Ключи отключённых кнопок — раскладка (LayoutStore.combosOff).
+     * Подключается в GameScreen при создании раскладки; по умолчанию пусто
+     * (все включены) — так и в юнит-тестах, и до первого захода в игру.
+     */
+    internal var disabledProvider: () -> Set<String> = { emptySet() }
+
+    /**
+     * Стабильный ключ отключения кнопки (хранится в конфиге раскладки):
+     *   * свои кнопки — по id («u:…»): id выдаёт [newId] один раз и
+     *     переживает переименование;
+     *   * пресеты — по имени («pres:…»): id «p0…» назначается по индексу
+     *     и меняется при переключении ROM сборника, имя задаёт картридж.
+     * Отключение прячет кнопку с поверхности, но определение (у [ComboStore]
+     * или у пресетов ROM) не трогает — включение возвращает кнопку на место.
+     */
+    fun disabledKey(b: ComboButton): String =
+        if (b.id.startsWith("u")) "u:" + b.id else "pres:" + b.name
+
+    /** Список без отключённых (ключи — [disabledKey]); порядок сохранён. */
+    fun withoutDisabled(all: List<ComboButton>, off: Set<String>): List<ComboButton> =
+        all.filter { disabledKey(it) !in off }
 
     /** Уникальный id новой пользовательской кнопки. */
     fun newId(): String {

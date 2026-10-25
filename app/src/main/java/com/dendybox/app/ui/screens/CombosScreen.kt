@@ -36,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
@@ -48,6 +49,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -56,6 +58,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -68,6 +72,7 @@ import com.dendybox.app.ui.controls.ComboButton
 import com.dendybox.app.ui.controls.ComboJson
 import com.dendybox.app.ui.controls.ComboStep
 import com.dendybox.app.ui.controls.ComboStore
+import com.dendybox.app.ui.controls.LayoutStore
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -78,6 +83,11 @@ import kotlin.math.min
  * выбранной игры из roms/games.json, меняются при переключении игры)
  * и пользовательские кнопки (создание/редактирование/удаление, хранятся
  * глобально — ComboStore).
+ *
+ * Любую кнопку (и пресет, и свою) можно отключить переключателем «На экране»:
+ * она пропадает с игровой поверхности (и её нельзя нажать), но определение
+ * сохраняется — включение возвращает кнопку. Состояние — в конфиге
+ * раскладки (LayoutStore, переживает перезапуск).
  *
  * Шаг последовательности: набор кнопок джойстика (можно несколько —
  * нажимаются ОДНОВРЕМЕННО), пауза 0–500 мс (кратно 50) перед началом шага
@@ -90,7 +100,7 @@ import kotlin.math.min
  * «Комбо-кнопки»). Старые конфиги без новых полей играются как раньше.
  */
 @Composable
-fun ComboPanel(onBack: () -> Unit) {
+fun ComboPanel(onBack: () -> Unit, layout: LayoutStore) {
     val context = LocalContext.current
     // null — список; иначе редактируемая кнопка (id существующей или новая)
     var editorFor by remember { mutableStateOf<ComboButton?>(null) }
@@ -142,7 +152,14 @@ fun ComboPanel(onBack: () -> Unit) {
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                presets.forEach { ComboCard(it, preset = true, onEdit = {}, onDelete = null) }
+                presets.forEach { ComboCard(
+                    it,
+                    preset = true,
+                    onEdit = {},
+                    onDelete = null,
+                    enabled = layout.isComboEnabled(ComboStore.disabledKey(it)),
+                    onEnabled = { on -> layout.setComboEnabled(ComboStore.disabledKey(it), on) }
+                ) }
             }
 
             Text(
@@ -167,14 +184,18 @@ fun ComboPanel(onBack: () -> Unit) {
                     onDelete = {
                         ComboStore.remove(b.id)
                         Toast.makeText(context, "«${b.name}» удалена", Toast.LENGTH_SHORT).show()
-                    }
+                    },
+                    enabled = layout.isComboEnabled(ComboStore.disabledKey(b)),
+                    onEnabled = { on -> layout.setComboEnabled(ComboStore.disabledKey(b), on) }
                 )
             }
 
             Text(
                 "Кнопки лежат внизу по центру игровой поверхности. Передвинуть блок " +
                     "и поменять размер — «Настройки управления» (блок «Комбо-кнопки»). " +
-                    "Повторное нажатие кнопки перезапускает комбинацию с начала.",
+                    "Повторное нажатие кнопки перезапускает комбинацию с начала. " +
+                    "Выключенный тумблер «На экране» прячет кнопку с поверхности " +
+                    "(остальные подтягиваются компактнее), не удаляя её — включите обратно.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -200,7 +221,9 @@ private fun ComboCard(
     b: ComboButton,
     preset: Boolean,
     onEdit: () -> Unit,
-    onDelete: (() -> Unit)?
+    onDelete: (() -> Unit)?,
+    enabled: Boolean,
+    onEnabled: (Boolean) -> Unit
 ) {
     Surface(shape = RoundedCornerShape(12.dp)) {
         Row(
@@ -209,7 +232,7 @@ private fun ComboCard(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f).alpha(if (enabled) 1f else 0.45f)) {
                 Text(b.name, style = MaterialTheme.typography.titleMedium)
                 Text(
                     ComboJson.stepsText(b.steps),
@@ -223,6 +246,26 @@ private fun ComboCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 6.dp)
+                )
+            }
+            // Отключение прячет кнопку с игровой поверхности (определение
+            // сохраняется — включение возвращает); работает и у пресетов,
+            // и у своих кнопок
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(start = 8.dp)
+            ) {
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onEnabled,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Показывать «${b.name}» на игровой поверхности"
+                    }
+                )
+                Text(
+                    "На экране",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             if (!preset && onDelete != null) {

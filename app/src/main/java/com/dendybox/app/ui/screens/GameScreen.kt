@@ -77,6 +77,10 @@ fun GameScreen(
     val layoutStore = remember {
         LayoutStore(context.getSharedPreferences("layout", Context.MODE_PRIVATE))
     }
+    // Отключённые комбо-кнопки (ключи) живут в раскладке: ComboStore.effective()
+    // читает их через провайдер — на поверхности показываются/нажимаются только
+    // включённые кнопки, при переключении в конфигураторе набор обновляется сам
+    ComboStore.disabledProvider = { layoutStore.combosOff }
     val editing = screen == Screen.EDIT
 
     // Какой блок редактируется (выделяется касанием, масштаб — слайдером/щипком)
@@ -349,7 +353,10 @@ fun GameScreen(
                 )
             }
 
-            Screen.COMBOS -> ComboPanel(onBack = { onScreen(Screen.PAUSE) })
+            Screen.COMBOS -> ComboPanel(
+                onBack = { onScreen(Screen.PAUSE) },
+                layout = layoutStore
+            )
 
             Screen.SETTINGS -> SettingsPanel(
                 onBack = { onScreen(Screen.PAUSE) },
