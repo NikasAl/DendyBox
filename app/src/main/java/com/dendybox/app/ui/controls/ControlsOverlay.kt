@@ -29,6 +29,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -93,12 +94,42 @@ val SPECS_META = listOf(
     CtrlSpec("START", "START", 29f, 0f, 46f)
 )
 
+/**
+ * Блок на игровой поверхности: обычная группа ([gid]) или комбо-группа
+ * №[comboIdx] ([comboGroups]). Обычные группы (крестовина, A/B и т.д.)
+ * не тронуты — BlockRef обобщает только позиционирование/рисовку/ hit-test,
+ * чтобы комбо-кнопок могло быть несколько блоков.
+ */
+data class BlockRef(val gid: LayoutStore.GroupId, val comboIdx: Int = -1) {
+    val isCombo: Boolean get() = gid == LayoutStore.GroupId.COMBO && comboIdx >= 0
+
+    /** Имя привязки сырых касаний (уникально на блок; GamepadInput). */
+    val bindName: String
+        get() = if (isCombo) "${gid.name}:$comboIdx" else gid.name
+}
+
 private fun specsOf(id: LayoutStore.GroupId): List<CtrlSpec> = when (id) {
     LayoutStore.GroupId.AB -> SPECS_AB
     LayoutStore.GroupId.AB2 -> SPECS_AB2
     LayoutStore.GroupId.META -> SPECS_META
-    LayoutStore.GroupId.COMBO -> comboSpecs(ComboStore.effective())
-    LayoutStore.GroupId.DPAD, LayoutStore.GroupId.DPAD2 -> emptyList()
+    else -> emptyList()
+}
+
+/**
+ * Спеки кластера A/B с учётом скрытых пар ([LayoutStore.abOff]): скрытая
+ * пара НЕ рисуется и не занимает места — остаются только кнопки видимой
+ * половины (рамка/hit-test следуют за ними).
+ */
+fun specsAb(hidden: Set<String>): List<CtrlSpec> = SPECS_AB.filter { s ->
+    !((s.id == "A" || s.id == "B") && LayoutStore.AB_MAIN in hidden ||
+        (s.id == "TA" || s.id == "TB") && LayoutStore.AB_TURBO in hidden)
+}
+
+/** Спеки БЛОКА: комбо-группа №i, кластер A/B с учётом скрытых пар, прочие. */
+internal fun specsFor(store: LayoutStore, ref: BlockRef): List<CtrlSpec> = when {
+    ref.isCombo -> comboSpecs(comboButtonsOf(store, ref.comboIdx))
+    ref.gid == LayoutStore.GroupId.AB -> specsAb(store.abOff)
+    else -> specsOf(ref.gid)
 }
 
 /**
@@ -110,30 +141,33 @@ private fun specsOf(id: LayoutStore.GroupId): List<CtrlSpec> = when (id) {
  * У A/B второго игрока турбо нет — рамка обнимает кнопки симметрично.
  * Рамка в редакторе и зажим в границах экрана следуют контенту — без
  * «фантомного» отступа под кнопками, чтобы блок можно было прижать
- * к нижнему краю экрана.
+ * к нижнему краю экрана. Скрытые пары ([specsAb]) места не занимают —
+ * см. [extentsAb].
  */
 data class Extents(val left: Float, val top: Float, val right: Float, val bottom: Float)
 
+/**
+ * Границы кластера A/B при скрытых парах: рамка обнимает видимую половину.
+ * Обе пары скрыты — квадратик 24dp (как пустой блок комбо), чтобы блок
+ * можно было взять в редакторе.
+ */
+fun extentsAb(hidden: Set<String>): Extents {
+    val mainVisible = LayoutStore.AB_MAIN !in hidden
+    val turboVisible = LayoutStore.AB_TURBO !in hidden
+    return when {
+        mainVisible && turboVisible -> Extents(68f, 104f, 68f, 32f)
+        mainVisible -> Extents(68f, 32f, 68f, 32f)
+        turboVisible -> Extents(68f, 104f, 68f, 40f)
+        else -> Extents(24f, 24f, 24f, 24f)
+    }
+}
+
 fun extentsDp(id: LayoutStore.GroupId, dpadBaseRadiusDp: Float): Extents = when (id) {
-    LayoutStore.GroupId.AB ->
-        Extents(left = 68f, top = 104f, right = 68f, bottom = 32f)
+    LayoutStore.GroupId.AB -> extentsAb(emptySet())
     LayoutStore.GroupId.AB2 ->
         Extents(left = 68f, top = 32f, right = 68f, bottom = 32f)
     LayoutStore.GroupId.META -> Extents(left = 52f, top = 23f, right = 52f, bottom = 23f)
-    LayoutStore.GroupId.COMBO -> {
-        // Блок комбо-кнопок: сетка по числу кнопок (см. [comboSpecs]);
-        // пустой блок — квадратик 48dp, чтобы рамку можно было тянуть в редакторе
-        val n = ComboStore.effective().size
-        if (n == 0) {
-            Extents(24f, 24f, 24f, 24f)
-        } else {
-            val cols = comboCols(n)
-            val rows = (n + cols - 1) / cols
-            val hw = (cols - 1) * COMBO_PITCH / 2f + COMBO_SIZE / 2f
-            val hh = (rows - 1) * COMBO_PITCH / 2f + COMBO_SIZE / 2f
-            Extents(hw, hh, hw, hh)
-        }
-    }
+    LayoutStore.GroupId.COMBO -> comboExtentsDp(ComboStore.effective().size)
     LayoutStore.GroupId.DPAD, LayoutStore.GroupId.DPAD2 -> Extents(
         left = dpadBaseRadiusDp,
         top = dpadBaseRadiusDp,
@@ -141,6 +175,23 @@ fun extentsDp(id: LayoutStore.GroupId, dpadBaseRadiusDp: Float): Extents = when 
         bottom = dpadBaseRadiusDp
     )
 }
+
+/** Позиция/масштаб блока (комбо-группа №i или обычная группа). */
+internal fun blockGroup(store: LayoutStore, ref: BlockRef): LayoutStore.Group =
+    if (ref.isCombo) {
+        val cg = store.comboGroups[ref.comboIdx]
+        LayoutStore.Group(cg.x, cg.y, cg.scale)
+    } else {
+        store.group(ref.gid)
+    }
+
+/** Границы контента блока (комбо-группы — по числу ВИДИМЫХ кнопок). */
+internal fun blockExtents(store: LayoutStore, ref: BlockRef, dpadBaseRadiusDp: Float): Extents =
+    when {
+        ref.isCombo -> comboExtentsDp(comboButtonsOf(store, ref.comboIdx).size)
+        ref.gid == LayoutStore.GroupId.AB -> extentsAb(store.abOff)
+        else -> extentsDp(ref.gid, dpadBaseRadiusDp)
+    }
 
 // ---------------------------------------------------------------------------
 // Программируемые комбо-кнопки (наполнение — ComboStore: пресеты игры +
@@ -177,20 +228,133 @@ fun comboSpecs(buttons: List<ComboButton>): List<CtrlSpec> {
     }
 }
 
+/**
+ * Границы блока из n комбо-кнопок (сетка [comboSpecs]); пустой блок —
+ * квадратик 48dp, чтобы рамку можно было тянуть в редакторе.
+ */
+fun comboExtentsDp(n: Int): Extents =
+    if (n == 0) {
+        Extents(24f, 24f, 24f, 24f)
+    } else {
+        val cols = comboCols(n)
+        val rows = (n + cols - 1) / cols
+        val hw = (cols - 1) * COMBO_PITCH / 2f + COMBO_SIZE / 2f
+        val hh = (rows - 1) * COMBO_PITCH / 2f + COMBO_SIZE / 2f
+        Extents(hw, hh, hw, hh)
+    }
+
+/**
+ * Кнопки комбо-группы №[idx] в ПОРЯДКЕ СЕТКИ: участники из
+ * [LayoutStore.comboGroups] (ключи [ComboStore.disabledKey]) плюс — только
+ * для группы №0 — непрописанные кнопки в конце (созданная кнопка
+ * появляется там автоматически). Ключи отсутствующих кнопок («дремлющие»:
+ * другой ROM сборника, удалённая кнопка) молча пропускаются.
+ */
+fun comboButtonsOf(store: LayoutStore, idx: Int): List<ComboButton> {
+    if (idx !in store.comboGroups.indices) return emptyList()
+    val all = ComboStore.effective()
+    val keys = store.comboGroups[idx].keys
+    val listed = keys.mapNotNull { k -> all.firstOrNull { ComboStore.disabledKey(it) == k } }
+    if (idx != 0) return listed
+    // группа №0 добирает кнопки, не прописанные ни в одной группе
+    val assigned = store.comboGroups.flatMap { it.keys }.toSet()
+    return listed + all.filter { ComboStore.disabledKey(it) !in assigned }
+}
+
+/**
+ * Номер ячейки сетки из n кнопок, ближайшей к точке ([dxDp], [dyDp]) от
+ * якоря (обратная задача [comboSpecs]); результат 0..n — n означает
+ * «в конец списка». Используется при перетаскивании кнопки в редакторе.
+ */
+fun comboCellAt(n: Int, dxDp: Float, dyDp: Float): Int {
+    if (n <= 0) return 0
+    val cols = comboCols(n)
+    val rows = (n + cols - 1) / cols
+    val col = Math.round(dxDp / COMBO_PITCH + (cols - 1) / 2f).coerceIn(0, cols - 1)
+    val row = Math.round(dyDp / COMBO_PITCH + (rows - 1) / 2f).coerceIn(0, rows - 1)
+    return (row * cols + col).coerceIn(0, n)
+}
+
+/**
+ * Перетаскивание комбо-кнопки в редакторе: точка ([xPx], [yPx]) px — палец
+ * на кнопке [specId] из группы [fromIdx]. Кнопка переставляется ВНУТРИ
+ * своей группы (порядок в сетке) или переносится в группу, над которой
+ * отпущен палец. Живая реакция: состав групп меняется прямо во время
+ * перетаскивания, кнопка «прыгает» на свою ячейку. Точка мимо всех
+ * рамок (с запасом в полшага сетки) — изменений нет.
+ */
+internal fun comboDragTo(
+    store: LayoutStore,
+    fromIdx: Int,
+    specId: String,
+    xPx: Float,
+    yPx: Float,
+    parentPx: IntSize,
+    density: Density
+) {
+    val source = comboButtonsOf(store, fromIdx)
+    val dragged = source.firstOrNull { "K${it.id}" == specId } ?: return
+    val key = ComboStore.disabledKey(dragged)
+
+    for (i in store.comboGroups.indices) {
+        val cg = store.comboGroups[i]
+        val cx = cg.x * parentPx.width
+        val cy = cg.y * parentPx.height
+        val dxDp = with(density) { (xPx - cx).toDp().value } / cg.scale
+        val dyDp = with(density) { (yPx - cy).toDp().value } / cg.scale
+        val members = comboButtonsOf(store, i)
+        val e = comboExtentsDp(members.size)
+        val slack = COMBO_PITCH / 2f
+        if (dxDp < -e.left - slack || dxDp > e.right + slack ||
+            dyDp < -e.top - slack || dyDp > e.bottom + slack
+        ) continue
+
+        val memberKeys = members.map { ComboStore.disabledKey(it) }
+        // «дремлющие» ключи группы (кнопки другого ROM/удалённые) — в конец,
+        // порядок между собой сохраняем: расстановка восстановится с ромом
+        val dormant = store.comboGroups[i].keys.filter { it !in memberKeys }
+        if (i == fromIdx) {
+            val cell = comboCellAt(members.size, dxDp, dyDp)
+            val own = memberKeys.indexOf(key)
+            // порядок не меняется: кнопка уже на своей ячейке (или сразу за ней)
+            if (own >= 0 && (cell == own || cell == own + 1)) return
+            val without = memberKeys - key
+            // индекс вставки после удаления: до своей позиции — как есть,
+            // после — сдвиг на единицу
+            val at = (if (own >= 0 && cell > own) cell - 1 else cell).coerceIn(0, without.size)
+            store.setComboGroupKeys(
+                i,
+                without.toMutableList().apply { add(at, key) } + dormant
+            )
+        } else {
+            val cell = comboCellAt(members.size, dxDp, dyDp).coerceIn(0, members.size)
+            // перенос: из исходной группы убрать, в целевую вставить на ячейку
+            store.setComboGroupKeys(fromIdx, store.comboGroups[fromIdx].keys - key)
+            store.setComboGroupKeys(
+                i,
+                memberKeys.toMutableList().apply { add(cell, key) } +
+                    dormant.filter { it != key }
+            )
+        }
+        return
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Общая механика редактора: сдвиг/масштаб группы с зажимом в границах экрана
 // ---------------------------------------------------------------------------
 
 /**
- * Сдвинуть группу на [dxPx]/[dyPx] пикселей и умножить масштаб на [zoom].
- * Зажим — по контентным границам группы (несимметричным для A/B: снизу
- * рамка прижата к кнопкам — блок можно ставить у самого низа экрана).
+ * Сдвинуть блок на [dxPx]/[dyPx] пикселей и умножить масштаб на [zoom].
+ * Зажим — по контентным границам блока (несимметричным для A/B: снизу
+ * рамка прижата к кнопкам — блок можно ставить у самого низа экрана;
+ * у комбо-групп — по числу её видимых кнопок).
  * Всё состояние читается ВНУТРИ на момент события (колбэки pointerInput
  * не пересоздаются при рекомпозиции — захватывать значения «на старте» нельзя).
  */
 private fun moveGroupBy(
     store: LayoutStore,
-    id: LayoutStore.GroupId,
+    ref: BlockRef,
     dxPx: Float,
     dyPx: Float,
     zoom: Float,
@@ -198,29 +362,28 @@ private fun moveGroupBy(
     density: Density,
     dpadBaseRadiusDp: Float
 ) {
-    val g = store.group(id)
-    val e = extentsDp(id, dpadBaseRadiusDp)
+    val g = blockGroup(store, ref)
+    val e = blockExtents(store, ref, dpadBaseRadiusDp)
     val l = with(density) { (e.left * g.scale).dp.toPx() / parentPx.width }.coerceAtMost(0.5f)
     val r = with(density) { (e.right * g.scale).dp.toPx() / parentPx.width }.coerceAtMost(0.5f)
     val t = with(density) { (e.top * g.scale).dp.toPx() / parentPx.height }.coerceAtMost(0.5f)
     val b = with(density) { (e.bottom * g.scale).dp.toPx() / parentPx.height }.coerceAtMost(0.5f)
-    store.updateGroup(
-        id,
-        LayoutStore.Group(
-            x = (g.x + dxPx / parentPx.width).coerceIn(l, (1f - r).coerceAtLeast(l)),
-            y = (g.y + dyPx / parentPx.height).coerceIn(t, (1f - b).coerceAtLeast(t)),
-            scale = (g.scale * zoom).coerceIn(LayoutStore.MIN_SCALE, LayoutStore.MAX_SCALE)
-        )
+    val next = LayoutStore.Group(
+        x = (g.x + dxPx / parentPx.width).coerceIn(l, (1f - r).coerceAtLeast(l)),
+        y = (g.y + dyPx / parentPx.height).coerceIn(t, (1f - b).coerceAtLeast(t)),
+        scale = (g.scale * zoom).coerceIn(LayoutStore.MIN_SCALE, LayoutStore.MAX_SCALE)
     )
+    if (ref.isCombo) store.updateComboGroupPos(ref.comboIdx, next.x, next.y, next.scale)
+    else store.updateGroup(ref.gid, next)
 }
 
 /**
  * Невидимый ФОН редактора: перетаскивание в любом пустом месте двигает
- * ВЫДЕЛЕННУЮ группу (видно по рамке), щипок двумя пальцами меняет её масштаб.
+ * ВЫДЕЛЕННЫЙ блок (видно по рамке), щипок двумя пальцами меняет его масштаб.
  * Касания самих блоков перехватываются блоками — они выше по z-порядку.
  */
 @Composable
-fun EditorSurface(store: LayoutStore, selected: LayoutStore.GroupId) {
+fun EditorSurface(store: LayoutStore, selected: BlockRef) {
     val dpadBaseR = SettingsStore.dpadSize.value
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val parentPx = IntSize(constraints.maxWidth, constraints.maxHeight)
@@ -307,17 +470,17 @@ private fun GroupFrame(
 // ---------------------------------------------------------------------------
 
 /**
- * Какая кнопка группы [gid] находится в точке ([x], [y]) px?
- * Формулы позиций — ТЕ ЖЕ, что при отрисовке кнопок в [ControlsLayer]:
- * центр группы (g.x/g.y в долях экрана) + офсет спецификации, размер
- * с масштабом. null — точка вне кнопок группы.
+ * Какая кнопка находится в точке ([x], [y]) px, если кнопки блока — [specs]
+ * с якорем/масштабом [g]? Формулы позиций — ТЕ ЖЕ, что при отрисовке кнопок
+ * в [ControlsLayer]: центр блока (g.x/g.y в долях экрана) + офсет спецификации,
+ * размер с масштабом. null — точка вне кнопок блока.
  * Координаты — окно (сырые события активности, см. GamepadInput); при
  * immersive-полноэкране совпадают с координатами родителя слоёв управления.
- * Позиция/масштаб читаются на момент события — редактирование раскладки
- * без пересоздания бинда не рассинхронизирует hit-test и рисунок.
+ * Позиция/масштаб/состав кнопок читаются на момент события — редактирование
+ * раскладки без пересоздания бинда не рассинхронизирует hit-test и рисунок.
  */
 private fun hitTestButton(
-    gid: LayoutStore.GroupId,
+    specs: List<CtrlSpec>,
     g: LayoutStore.Group,
     x: Float,
     y: Float,
@@ -326,7 +489,7 @@ private fun hitTestButton(
 ): String? {
     val cx = g.x * parentPx.width
     val cy = g.y * parentPx.height
-    for (spec in specsOf(gid)) {
+    for (spec in specs) {
         val s = spec.size * g.scale * density.density
         val left = cx + spec.dx * g.scale * density.density - s / 2f
         val top = cy + spec.dy * g.scale * density.density - s / 2f
@@ -339,8 +502,8 @@ private fun hitTestButton(
 fun ControlsLayer(
     store: LayoutStore,
     editing: Boolean,
-    selected: LayoutStore.GroupId = LayoutStore.GroupId.AB,
-    onSelect: (LayoutStore.GroupId) -> Unit = {},
+    selected: BlockRef = BlockRef(LayoutStore.GroupId.AB),
+    onSelect: (BlockRef) -> Unit = {},
     inputPort: Int = 0,
     p2Style: Boolean = false
 ) {
@@ -354,15 +517,22 @@ fun ControlsLayer(
         // Слайдер «Видимость» двигает и картинку-подложку блока (imgBlock)
         val opacity by SettingsStore.controlsOpacity.collectAsState()
 
-        val groups = if (p2Style) {
-            listOf(LayoutStore.GroupId.AB2)
+        // Блоки слоя. Кластер A/B в игре скрывается целиком, если скрыты
+        // ОБЕ пары; каждая комбо-группа — отдельный блок: в игре — только
+        // с кнопками, в редакторе — всегда (рамку можно поставить заранее)
+        val blocks = if (p2Style) {
+            listOf(BlockRef(LayoutStore.GroupId.AB2))
         } else {
-            // Комбо-блок в игре показываем только когда есть кнопки;
-            // в редакторе — всегда (рамку можно поставить заранее)
-            if (editing || ComboStore.effective().isNotEmpty()) {
-                listOf(LayoutStore.GroupId.AB, LayoutStore.GroupId.META, LayoutStore.GroupId.COMBO)
-            } else {
-                listOf(LayoutStore.GroupId.AB, LayoutStore.GroupId.META)
+            buildList {
+                if (editing || specsAb(store.abOff).isNotEmpty()) {
+                    add(BlockRef(LayoutStore.GroupId.AB))
+                }
+                add(BlockRef(LayoutStore.GroupId.META))
+                store.comboGroups.indices.forEach { i ->
+                    if (editing || comboButtonsOf(store, i).isNotEmpty()) {
+                        add(BlockRef(LayoutStore.GroupId.COMBO, i))
+                    }
+                }
             }
         }
 
@@ -370,12 +540,10 @@ fun ControlsLayer(
         // дольше рекомпозиций; см. комментарий в GameScreen про netplay)
         val currentPort by rememberUpdatedState(inputPort)
 
-        // Подсветка нажатых кнопок: одна карта на группу. Обновляется
-        // маршрутизатором сырых касаний (GamepadInput), читается в GameButton —
-        // рекомпозиция кнопки при нажатии/отжатии.
-        val pressedByGroup = remember {
-            groups.associateWith { mutableStateMapOf<String, Boolean>() }
-        }
+        // Подсветка нажатых кнопок: одна карта на блок со СТАБИЛЬНОЙ идентичностью
+        // (getOrPut в remember-карте — добавление/удаление комбо-групп не сбрасывает
+        // подсветку и не пересоздаёт бинды остальных блоков).
+        val pressedMaps = remember { HashMap<BlockRef, SnapshotStateMap<String, Boolean>>() }
 
         // КАК РАБОТАЮТ КАСАНИЯ КНОПОК в игровом режиме: НЕ через Compose.
         // Раньше зона группы была pointerInput-боксом — hit-path/жестовая
@@ -391,15 +559,15 @@ fun ControlsLayer(
         //
         // Группа привязана, пока слой в игровом режиме на экране: уход в
         // паузу/редактор (DisposableEffect.onDispose) отжимает её кнопки.
-        // Геометрия (hitTest) читает масштаб/позицию НА МОМЕНТ СОБЫТИЯ —
+        // Геометрия (hitTest) читает масштаб/позицию/состав НА МОМЕНТ СОБЫТИЯ —
         // редактирование раскладки не рассинхронизирует hit-test и рисунок.
         // Координаты — окно (сырые события); при immersive-полноэкране
         // совпадают с координатами этого BoxWithConstraints.
-        groups.forEach { gid ->
-            val g = store.group(gid) // чтение state — рекомпозиция при изменении
+        blocks.forEach { ref ->
+            val g = blockGroup(store, ref) // чтение state — рекомпозиция при изменении
             val cx = g.x * parentPx.width
             val cy = g.y * parentPx.height
-            val e = extentsDp(gid, 0f)
+            val e = blockExtents(store, ref, 0f)
             val lPx = with(density) { (e.left * g.scale).dp.toPx() }
             val tPx = with(density) { (e.top * g.scale).dp.toPx() }
             val rPx = with(density) { (e.right * g.scale).dp.toPx() }
@@ -426,29 +594,29 @@ fun ControlsLayer(
 
             // Привязка группы к сырым касаниям (только в игровом режиме)
             if (!editing) {
-                key(gid) {
-                    val pressedState = pressedByGroup.getValue(gid)
+                key(ref.bindName) {
+                    val pressedState = pressedMaps.getOrPut(ref) { mutableStateMapOf() }
                     // Актуальные размеры/плотность на момент события: бинд
                     // живёт дольше рекомпозиций — захватывать значения нельзя
                     val px by rememberUpdatedState(parentPx)
                     val den by rememberUpdatedState(density)
-                    DisposableEffect(gid) {
+                    DisposableEffect(pressedState) {
                         GamepadInput.bindGroup(
-                            gid.name,
+                            ref.bindName,
                             hitTest = { x, y ->
-                                hitTestButton(gid, store.group(gid), x, y, px, den)
+                                hitTestButton(specsFor(store, ref), blockGroup(store, ref), x, y, px, den)
                             },
                             port = { currentPort },
                             pressed = pressedState
                         )
-                        onDispose { GamepadInput.unbindGroup(gid.name) }
+                        onDispose { GamepadInput.unbindGroup(ref.bindName) }
                     }
                 }
             }
 
             // Рамка группы — ПОД кнопками (объявлена раньше в z-порядке)
             if (editing) {
-                key(gid) {
+                key(ref.bindName) {
                     GroupFrame(
                         cxPx = cx,
                         cyPx = cy,
@@ -456,24 +624,28 @@ fun ControlsLayer(
                         topPx = tPx,
                         rightPx = rPx,
                         bottomPx = bPx,
-                        label = LayoutStore.title(gid),
-                        selected = selected == gid,
-                        onSelect = { onSelect(gid) },
+                        label = if (ref.isCombo) {
+                            store.comboGroups[ref.comboIdx].name
+                        } else {
+                            LayoutStore.title(ref.gid)
+                        },
+                        selected = selected == ref,
+                        onSelect = { onSelect(ref) },
                         onDragPx = { dx, dy ->
-                            moveGroupBy(store, gid, dx, dy, 1f, parentPx, density, 0f)
+                            moveGroupBy(store, ref, dx, dy, 1f, parentPx, density, 0f)
                         }
                     )
                 }
             }
 
-            specsOf(gid).forEach { spec ->
-                key(gid.name + spec.id) {
+            specsFor(store, ref).forEach { spec ->
+                key(ref.bindName + spec.id) {
                     val sizePx = with(density) { (spec.size * g.scale).dp.toPx() }
                     val x = (cx + spec.dx * g.scale * density.density - sizePx / 2f).toInt()
                     val y = (cy + spec.dy * g.scale * density.density - sizePx / 2f).toInt()
                     GameButton(
                         spec = spec,
-                        gid = gid,
+                        block = ref,
                         sizeDp = spec.size * g.scale,
                         xPx = x,
                         yPx = y,
@@ -481,13 +653,24 @@ fun ControlsLayer(
                         parentPx = parentPx,
                         density = density,
                         editing = editing,
-                        onSelect = { onSelect(gid) },
+                        onSelect = { onSelect(ref) },
+                        // В редакторе комбо-кнопка тянется КАК КНОПКА: порядок
+                        // в группе / перенос между группами (группу двигают
+                        // рамкой или фоном). Палец в координатах родителя:
+                        // собственный офсет кнопки известен в GameButton
+                        onComboDragPx = if (editing && ref.isCombo) {
+                            { px, py ->
+                                comboDragTo(
+                                    store, ref.comboIdx, spec.id, px, py, parentPx, density
+                                )
+                            }
+                        } else null,
                         // Подсветку нажатия ставит маршрутизатор касаний группы
-                        pressed = pressedByGroup[gid]?.get(spec.id) == true
+                        pressed = pressedMaps[ref]?.get(spec.id) == true
                     )
                 }
             }
-        } // groups.forEach
+        } // blocks.forEach
     }
 }
 
@@ -541,7 +724,7 @@ internal data class ControlAlphas(
 @Composable
 private fun GameButton(
     spec: CtrlSpec,
-    gid: LayoutStore.GroupId,
+    block: BlockRef,
     sizeDp: Float,
     xPx: Int,
     yPx: Int,
@@ -550,6 +733,10 @@ private fun GameButton(
     density: Density,
     editing: Boolean,
     onSelect: () -> Unit,
+    // Редактор, комбо-кнопка: тянется САМА КНОПКА (порядок в группе /
+    // перенос между группами, см. comboDragTo); палец — в координатах
+    // родителя. null — обычное поведение: тянется вся группа
+    onComboDragPx: ((Float, Float) -> Unit)?,
     // Нажатие выставляет маршрутизатор касаний группы (ControlsLayer);
     // в редакторе кнопки не «нажимаются» — параметр остаётся false
     pressed: Boolean
@@ -560,9 +747,13 @@ private fun GameButton(
     // Скин: форма/цвета/шрифт. collectAsState — смена скина перекрашивает
     // кнопку на живом игровом экране, без рестарта
     val skin = ControlSkins.byId(SettingsStore.controlSkin.collectAsState().value)
-    // pointerInput-корутины живут дольше рекомпозиций — колбэки читаем через
-    // rememberUpdatedState, иначе корутина держит лямбду первого состава
+    // pointerInput-корутины живут дольше рекомпозиций — колбэки и координаты
+    // (сетка комбо перестраивается прямо во время перетаскивания) читаем
+    // через rememberUpdatedState, иначе корутина держит лямбду первого состава
     val currentOnSelect by rememberUpdatedState(onSelect)
+    val currentComboDrag by rememberUpdatedState(onComboDragPx)
+    val currentX by rememberUpdatedState(xPx)
+    val currentY by rememberUpdatedState(yPx)
     val isTurbo = spec.id == "TA" || spec.id == "TB"
     val isCombo = spec.id.startsWith("K") // программируемая комбо-кнопка
     val isPill = spec.id == "SELECT" || spec.id == "START"
@@ -612,29 +803,50 @@ private fun GameButton(
             .size(sizeDp.dp)
             .then(
                 if (editing) {
-                    // Редактор: тап — выделить группу, тянуть — двигать СВОЮ группу.
-                    // Всё состояние читаем ВНУТРИ колбэка на момент события:
+                    // Редактор: тап — выделить блок. Тянуть: обычная кнопка
+                    // двигает СВОЙ блок; комбо-кнопка — переставляется сама
+                    // (порядок в группе / перенос между группами). Всё
+                    // состояние читаем ВНУТРИ колбэка на момент события:
                     // pointerInput не пересоздаётся при рекомпозиции, поэтому
                     // захваченные «на старте» значения устаревают.
                     // В игровом режиме касаний НЕТ: их маршрутизирует группа
                     // (FingerRouter в ControlsLayer) — палец может скользить
                     // между кнопками, перебрасывая нажатие с одной на другую.
-                    Modifier
-                        .pointerInput(gid) {
-                            detectTapGestures(onTap = { currentOnSelect() })
-                        }
-                        .pointerInput(parentPx, gid) {
-                            detectDragGestures(
-                                onDragStart = { currentOnSelect() },
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    moveGroupBy(
-                                        store, gid, dragAmount.x, dragAmount.y, 1f,
-                                        parentPx, density, 0f
-                                    )
-                                }
-                            )
-                        }
+                    if (onComboDragPx != null) {
+                        Modifier
+                            .pointerInput(block) {
+                                detectTapGestures(onTap = { currentOnSelect() })
+                            }
+                            .pointerInput(parentPx, block) {
+                                detectDragGestures(
+                                    onDragStart = { currentOnSelect() },
+                                    onDrag = { change, _ ->
+                                        change.consume()
+                                        currentComboDrag?.invoke(
+                                            currentX + change.position.x,
+                                            currentY + change.position.y
+                                        )
+                                    }
+                                )
+                            }
+                    } else {
+                        Modifier
+                            .pointerInput(block) {
+                                detectTapGestures(onTap = { currentOnSelect() })
+                            }
+                            .pointerInput(parentPx, block) {
+                                detectDragGestures(
+                                    onDragStart = { currentOnSelect() },
+                                    onDrag = { change, dragAmount ->
+                                        change.consume()
+                                        moveGroupBy(
+                                            store, block, dragAmount.x, dragAmount.y, 1f,
+                                            parentPx, density, 0f
+                                        )
+                                    }
+                                )
+                            }
+                    }
                 } else {
                     Modifier
                 }
@@ -738,7 +950,7 @@ fun DpadLayer(
                                     onDrag = { change, dragAmount ->
                                         change.consume()
                                         moveGroupBy(
-                                            store, gid,
+                                            store, BlockRef(gid),
                                             dragAmount.x, dragAmount.y, 1f,
                                             parentPx, density, dpadBaseR
                                         )
@@ -822,7 +1034,7 @@ fun DpadLayer(
                 onSelect = { onSelect(gid) },
                 onDragPx = { dx, dy ->
                     moveGroupBy(
-                        store, gid, dx, dy, 1f,
+                        store, BlockRef(gid), dx, dy, 1f,
                         parentPx, density, dpadBaseR
                     )
                 }

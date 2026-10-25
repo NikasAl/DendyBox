@@ -92,7 +92,7 @@ class LayoutStoreTest {
 
         store.resetAll()
         assertTrue(store.combosOff.isEmpty())
-        assertEquals(LayoutStore.DEF_COMBO, store.combo)
+        assertEquals(LayoutStore.DEF_COMBO_GROUP, store.comboGroups[0])
         // сброс сохранён — «перезапуск» его видит
         assertTrue(LayoutStore(prefs).combosOff.isEmpty())
     }

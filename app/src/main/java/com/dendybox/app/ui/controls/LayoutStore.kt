@@ -10,29 +10,50 @@ import androidx.compose.runtime.setValue
  *
  *  [GroupId.DPAD] — крестовина P1 (всегда видима);
  *  [GroupId.AB]   — кластер P1 «как на джойстике Dendy»: турбо B′/A′ сверху,
- *                   основные B/A под ними;
+ *                   основные B/A под ними; пары можно скрывать ([abOff]);
  *  [GroupId.META] — пилюли Select / Start отдельным блоком;
  *  [GroupId.DPAD2]/[GroupId.AB2] — второй набор для локальной игры на двоих
  *                   (видим только в режиме «2 игрока», турбо-кнопок нет);
- *  [GroupId.COMBO] — программируемые комбо-кнопки (наполнение — ComboStore:
- *                   пресеты игры + пользовательские; блока нет на экране,
- *                   пока список пуст — кроме редактора).
+ *  [GroupId.COMBO] — комбо-кнопки: группа №0 из [comboGroups] (наполнение —
+ *                   ComboStore: пресеты игры + пользовательские).
  *
  * Каждая группа независимо перемещается и масштабируется в редакторе
  * (Screen.EDIT). [Group.x]/[Group.y] — якорь группы (центр) в долях экрана,
  * [Group.scale] — масштаб всех элементов группы (1.0 = базовые dp-размеры).
  *
- * Кроме групп конфиг хранит ключи ОТКЛЮЧЁННЫХ комбо-кнопок ([combosOff]):
- * кнопка с таким ключом не рисуется и не активна на игровой поверхности,
- * но её определение сохраняется (у ComboStore/пресетов) — включение
- * возвращает её на место. Ключи считает [ComboStore.disabledKey]: свои
- * кнопки — по id (стабилен при переименовании), пресеты — по имени
- * (id «p0…» назначается по индексу и меняется при переключении ROM).
+ * КОМБО-ГРУППЫ ([comboGroups]): комбо-кнопки можно делить на несколько
+ * блоков — у каждого своё имя, якорь/масштаб и упорядоченный список
+ * участников (ключи [ComboStore.disabledKey] — те же устойчивые ключи,
+ * что у отключений: свои «u:id», пресеты «pres:имя»). Кнопки, не
+ * прописанные ни в одной группе, показываются в группе №0 после её
+ * участников (созданная кнопка появляется там автоматически). Ключи
+ * отсутствующих кнопок (другой ROM сборника, удалённая кнопка) остаются
+ * «дремать» в списке — расстановка восстанавливается при возврате рома.
+ * Группа №0 заменяет старое поле «combo»: старый конфиг без раздела
+ * comboGroups читается как одна группа с позицией «combo».
+ *
+ * Кроме групп конфиг хранит:
+ *  * ключи ОТКЛЮЧЁННЫХ комбо-кнопок ([combosOff]): кнопка с таким ключом
+ *    не рисуется и не активна, но её определение сохраняется — включение
+ *    возвращает её. Ключи считает [ComboStore.disabledKey];
+ *  * скрытые ПОДБЛОКИ кластера A/B ([abOff]): «main» — пара A/B,
+ *    «turbo» — пара турбо A′/B′. Скрытая пара не рисуется и не занимает
+ *    места, оставшаяся обнимается рамкой по контенту.
  *
  * Хранится в SharedPreferences под ключом layout_v3 (при смене модели
  * раскладки старые сохранённые позиции несовместимы — сбрасываются).
  */
 class LayoutStore(private val prefs: SharedPreferences) {
+
+    /** Блок комбо-кнопок: имя, якорь/масштаб и участники в порядке сетки. */
+    data class ComboGroup(
+        val name: String,
+        val x: Float,
+        val y: Float,
+        val scale: Float,
+        /** Ключи кнопок (ComboStore.disabledKey) в порядке отображения. */
+        val keys: List<String> = emptyList()
+    )
 
     enum class GroupId { DPAD, AB, META, DPAD2, AB2, COMBO }
 
@@ -48,20 +69,31 @@ class LayoutStore(private val prefs: SharedPreferences) {
         private set
     var ab2: Group by mutableStateOf(DEF_AB2)
         private set
-    var combo: Group by mutableStateOf(DEF_COMBO)
+
+    /**
+     * Комбо-группы (минимум одна); №0 — [GroupId.COMBO] (совместимость:
+     * group/updateGroup(GroupId.COMBO) работают с ней).
+     */
+    var comboGroups: List<ComboGroup> by mutableStateOf(listOf(DEF_COMBO_GROUP))
         private set
 
     /** Ключи отключённых комбо-кнопок (см. [ComboStore.disabledKey]). */
     var combosOff: Set<String> by mutableStateOf(emptySet())
         private set
 
+    /** Скрытые подблоки кластера A/B: [AB_MAIN] и/или [AB_TURBO]. */
+    var abOff: Set<String> by mutableStateOf(emptySet())
+        private set
+
     init {
         val raw = prefs.getString(PREF_KEY, null)
+        var ok = false
         if (raw != null) {
             try {
                 val o = org.json.JSONObject(raw)
-                // Раздел появился позже раскладки v3 — отсутствие не ошибка
+                // Разделы появились позже раскладки v3 — отсутствие не ошибка
                 combosOff = readCombosOff(o)
+                abOff = readAbOff(o)
                 fun read(k: String, def: Group): Group {
                     val g = o.optJSONObject(k) ?: return def
                     return try {
@@ -79,19 +111,20 @@ class LayoutStore(private val prefs: SharedPreferences) {
                 meta = read("meta", DEF_META)
                 dpad2 = read("dpad2", DEF_DPAD2)
                 ab2 = read("ab2", DEF_AB2)
-                // комбо-группа появилась позже раскладки v3 — отсутствие не ошибка
-                combo = read("combo", DEF_COMBO)
+                // комбо-группы: нет раздела — одна группа из старого «combo»
+                comboGroups = readComboGroups(o)
+                ok = true
             } catch (_: Exception) {
                 // повреждённые данные — используем значения по умолчанию
             }
         }
+        if (!ok) comboGroups = listOf(DEF_COMBO_GROUP)
         // санитизация на случай отредактированных вручную prefs
         dpad = sanitize(dpad)
         ab = sanitize(ab)
         meta = sanitize(meta)
         dpad2 = sanitize(dpad2)
         ab2 = sanitize(ab2)
-        combo = sanitize(combo)
     }
 
     fun group(id: GroupId): Group = when (id) {
@@ -100,7 +133,8 @@ class LayoutStore(private val prefs: SharedPreferences) {
         GroupId.META -> meta
         GroupId.DPAD2 -> dpad2
         GroupId.AB2 -> ab2
-        GroupId.COMBO -> combo
+        // комбо-группа №0 — преемник старого поля combo
+        GroupId.COMBO -> comboGroups[0].let { Group(it.x, it.y, it.scale) }
     }
 
     /** Обновить группу; значения зажимаются в допустимые пределы. */
@@ -112,9 +146,9 @@ class LayoutStore(private val prefs: SharedPreferences) {
             GroupId.META -> meta = v
             GroupId.DPAD2 -> dpad2 = v
             GroupId.AB2 -> ab2 = v
-            GroupId.COMBO -> combo = v
+            GroupId.COMBO -> updateComboGroupPos(0, v.x, v.y, v.scale)
         }
-        persist()
+        if (id != GroupId.COMBO) persist()
     }
 
     /** Текущая раскладка в том же JSON, что и в prefs (для экспорта в файл). */
@@ -125,14 +159,30 @@ class LayoutStore(private val prefs: SharedPreferences) {
             .put("s", g.scale.toDouble())
         val off = org.json.JSONArray()
         combosOff.sorted().forEach { off.put(it) }
+        val abOffArr = org.json.JSONArray()
+        abOff.sorted().forEach { abOffArr.put(it) }
+        val cgs = org.json.JSONArray()
+        comboGroups.forEach { cg ->
+            cgs.put(
+                org.json.JSONObject()
+                    .put("name", cg.name)
+                    .put("x", cg.x.toDouble())
+                    .put("y", cg.y.toDouble())
+                    .put("s", cg.scale.toDouble())
+                    .put("keys", org.json.JSONArray().apply { cg.keys.forEach { put(it) } })
+            )
+        }
         return org.json.JSONObject()
             .put("dpad", j(dpad))
             .put("ab", j(ab))
             .put("meta", j(meta))
             .put("dpad2", j(dpad2))
             .put("ab2", j(ab2))
-            .put("combo", j(combo))
+            // легаси-поле: позиция комбо-группы №0 (старые версии/скрипты)
+            .put("combo", j(Group(comboGroups[0].x, comboGroups[0].y, comboGroups[0].scale)))
+            .put("comboGroups", cgs)
             .put("combosOff", off)
+            .put("abOff", abOffArr)
             .toString()
     }
 
@@ -165,17 +215,20 @@ class LayoutStore(private val prefs: SharedPreferences) {
         // группы P2 необязательны: старый экспорт (3 группы) тоже импортируется
         read("dpad2")?.let { dpad2 = sanitize(it) }
         read("ab2")?.let { ab2 = sanitize(it) }
-        read("combo")?.let { combo = sanitize(it) }
-        // отключённые комбо тоже необязательны: старый экспорт без них
-        // означает «все включены» — импорт заменяет состояние целиком
+        // комбо-группы: старый экспорт без раздела — одна группа из «combo»
+        comboGroups = readComboGroups(o)
+        // отключённые комбо и скрытые пары A/B тоже необязательны: старый
+        // экспорт без них означает «все включены» — импорт заменяет состояние целиком
         combosOff = readCombosOff(o)
+        abOff = readAbOff(o)
         persist()
         return true
     }
 
     /**
-     * Вернуть все группы к заводской раскладке. Отключённые комбо-кнопки
-     * тоже сбрасываются (заводское состояние — все включены).
+     * Вернуть все группы к заводской раскладке. Отключённые комбо-кнопки,
+     * скрытые пары A/B и лишние комбо-группы тоже сбрасываются
+     * (заводское состояние — все включены, одна комбо-группа).
      */
     fun resetAll() {
         dpad = DEF_DPAD
@@ -183,8 +236,9 @@ class LayoutStore(private val prefs: SharedPreferences) {
         meta = DEF_META
         dpad2 = DEF_DPAD2
         ab2 = DEF_AB2
-        combo = DEF_COMBO
+        comboGroups = listOf(DEF_COMBO_GROUP)
         combosOff = emptySet()
+        abOff = emptySet()
         persist()
     }
 
@@ -203,6 +257,83 @@ class LayoutStore(private val prefs: SharedPreferences) {
     /** Кнопка с ключом [key] показывается на игровой поверхности? */
     fun isComboEnabled(key: String): Boolean = key !in combosOff
 
+    // ------------------------------------------------------------------
+    // Комбо-группы: создание/переименование/удаление, состав и порядок
+    // ------------------------------------------------------------------
+
+    /** Позиция/масштаб комбо-группы [i] (значения зажимаются). */
+    fun updateComboGroupPos(i: Int, x: Float, y: Float, scale: Float) {
+        if (i !in comboGroups.indices) return
+        val s = sanitize(Group(x, y, scale))
+        comboGroups = comboGroups.mapIndexed { gi, g ->
+            if (gi == i) g.copy(x = s.x, y = s.y, scale = s.scale) else g
+        }
+        persist()
+    }
+
+    /** Переименовать комбо-группу [i] (пустое имя игнорируется). */
+    fun renameComboGroup(i: Int, name: String) {
+        val nm = name.trim()
+        if (i !in comboGroups.indices || nm.isEmpty()) return
+        comboGroups = comboGroups.mapIndexed { gi, g ->
+            if (gi == i) g.copy(name = nm) else g
+        }
+        persist()
+    }
+
+    /** Новая комбо-группа в заводском месте; возвращает её индекс. */
+    fun addComboGroup(name: String? = null): Int {
+        val nm = name?.trim()?.takeUnless { it.isEmpty() } ?: "Группа ${comboGroups.size + 1}"
+        comboGroups = comboGroups + ComboGroup(nm, DEF_COMBO.x, DEF_COMBO.y, DEF_COMBO.scale)
+        persist()
+        return comboGroups.size - 1
+    }
+
+    /**
+     * Удалить комбо-группу [i]; её кнопки переезжают в конец первой
+     * оставшейся группы. false — группа последняя (удалять нельзя).
+     */
+    fun removeComboGroup(i: Int): Boolean {
+        if (i !in comboGroups.indices || comboGroups.size <= 1) return false
+        val removed = comboGroups[i]
+        val rest = comboGroups.filterIndexed { gi, _ -> gi != i }.toMutableList()
+        // кнопки удаляемой группы переезжают в конец первой оставшейся
+        val first = rest[0]
+        rest[0] = first.copy(keys = first.keys + removed.keys.filter { it !in first.keys })
+        comboGroups = rest.toList()
+        persist()
+        return true
+    }
+
+    /** Группа кнопки с ключом [key]: первая содержащая, иначе №0 (не прописана). */
+    fun comboGroupOfKey(key: String): Int =
+        comboGroups.indexOfFirst { key in it.keys }.let { if (it >= 0) it else 0 }
+
+    /** Переписать список участников комбо-группы [i] (пустые/дубли убираются). */
+    fun setComboGroupKeys(i: Int, keys: List<String>) {
+        if (i !in comboGroups.indices) return
+        val clean = keys.filter { it.isNotBlank() }.distinct()
+        comboGroups = comboGroups.mapIndexed { gi, g ->
+            if (gi == i) g.copy(keys = clean) else g
+        }
+        persist()
+    }
+
+    // ------------------------------------------------------------------
+    // Скрытие подблоков кластера A/B
+    // ------------------------------------------------------------------
+
+    /** Скрыта ли пара кластера A/B ([AB_MAIN] или [AB_TURBO])? */
+    fun isAbHidden(part: String): Boolean = part in abOff
+
+    /** Скрыть/вернуть пару кластера A/B ([AB_MAIN] или [AB_TURBO]). */
+    fun setAbHidden(part: String, hidden: Boolean) {
+        val next = if (hidden) abOff + part else abOff - part
+        if (next == abOff) return
+        abOff = next
+        persist()
+    }
+
     /** Раздел «combosOff» конфига: массив строк; нет/битый — пустой набор. */
     private fun readCombosOff(o: org.json.JSONObject): Set<String> = try {
         val arr = o.getJSONArray("combosOff")
@@ -212,6 +343,64 @@ class LayoutStore(private val prefs: SharedPreferences) {
     } catch (_: Exception) {
         emptySet()
     }
+
+    /** Раздел «abOff»: только известные подблоки; нет/битый — пустой набор. */
+    private fun readAbOff(o: org.json.JSONObject): Set<String> = try {
+        val arr = o.getJSONArray("abOff")
+        (0 until arr.length()).mapNotNull { i ->
+            when (arr.optString(i)) {
+                AB_MAIN -> AB_MAIN
+                AB_TURBO -> AB_TURBO
+                else -> null
+            }
+        }.toSet()
+    } catch (_: Exception) {
+        emptySet()
+    }
+
+    /**
+     * Раздел «comboGroups»: массив групп; нет/пустой/битый — одна группа
+     * с позицией легаси-поля «combo» (или заводская).
+     */
+    private fun readComboGroups(o: org.json.JSONObject): List<ComboGroup> {
+        val fallback = try {
+            val c = o.getJSONObject("combo")
+            sanitize(Group(c.getDouble("x").toFloat(), c.getDouble("y").toFloat(), c.getDouble("s").toFloat()))
+        } catch (_: Exception) {
+            sanitize(DEF_COMBO)
+        }
+        val arr = o.optJSONArray("comboGroups") ?: return listOf(defaultComboGroup(fallback))
+        val out = ArrayList<ComboGroup>()
+        for (i in 0 until arr.length()) {
+            val g = arr.optJSONObject(i) ?: continue
+            val pos = try {
+                sanitize(
+                    Group(
+                        g.getDouble("x").toFloat(),
+                        g.getDouble("y").toFloat(),
+                        g.getDouble("s").toFloat()
+                    )
+                )
+            } catch (_: Exception) {
+                sanitize(DEF_COMBO)
+            }
+            val name = g.optString("name").takeUnless { it.isBlank() } ?: "Группа ${out.size + 1}"
+            val keys = ArrayList<String>()
+            val ka = g.optJSONArray("keys")
+            if (ka != null) {
+                for (k in 0 until ka.length()) {
+                    val key = ka.optString(k)
+                    if (key.isNotEmpty() && key !in keys) keys.add(key)
+                }
+            }
+            out.add(ComboGroup(name, pos.x, pos.y, pos.scale, keys))
+        }
+        if (out.isEmpty()) return listOf(defaultComboGroup(fallback))
+        return out
+    }
+
+    private fun defaultComboGroup(pos: Group) =
+        ComboGroup("Комбо-кнопки", pos.x, pos.y, pos.scale)
 
     private fun sanitize(g: Group) = Group(
         x = g.x.coerceIn(0.02f, 0.98f),
@@ -243,6 +432,12 @@ class LayoutStore(private val prefs: SharedPreferences) {
         private const val PREF_KEY = "layout_v3"
         private const val PREF_2P_PRESET = "layout_2p_preset_v1"
 
+        /** Подблок кластера A/B: основная пара A/B. */
+        const val AB_MAIN = "main"
+
+        /** Подблок кластера A/B: пара турбо A′/B′. */
+        const val AB_TURBO = "turbo"
+
         const val MIN_SCALE = 0.5f
         const val MAX_SCALE = 2.0f
 
@@ -260,6 +455,9 @@ class LayoutStore(private val prefs: SharedPreferences) {
 
         // Комбо-кнопки: низ по центру, между крестовиной и A/B
         val DEF_COMBO = Group(0.5f, 0.86f, 1.0f)
+
+        /** Заводская комбо-группа №0 (единственная после сброса). */
+        val DEF_COMBO_GROUP = ComboGroup("Комбо-кнопки", DEF_COMBO.x, DEF_COMBO.y, DEF_COMBO.scale)
 
         fun title(id: GroupId): String = when (id) {
             GroupId.DPAD -> "Крестовина"

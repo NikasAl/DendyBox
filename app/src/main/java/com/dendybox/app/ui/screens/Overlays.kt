@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.VideogameAsset
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
@@ -42,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -68,6 +70,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.dendybox.app.saves.SaveManager
 import com.dendybox.app.settings.SettingsStore
+import com.dendybox.app.ui.controls.BlockRef
 import com.dendybox.app.ui.controls.ControlSkins
 import com.dendybox.app.ui.controls.LayoutStore
 import java.text.SimpleDateFormat
@@ -550,13 +553,21 @@ private fun SettingSwitch(
 @Composable
 fun EditBar(
     store: LayoutStore,
-    selected: LayoutStore.GroupId,
-    onSelectGroup: (LayoutStore.GroupId) -> Unit,
+    selected: BlockRef,
+    onSelect: (BlockRef) -> Unit,
     onDone: () -> Unit,
     showP2: Boolean = false
 ) {
     val context = LocalContext.current
-    val g = store.group(selected)
+    // Позиция/масштаб выбранного блока: комбо-группа №i или обычная группа
+    val g = if (selected.isCombo) {
+        val cg = store.comboGroups.getOrElse(selected.comboIdx) { store.comboGroups[0] }
+        LayoutStore.Group(cg.x, cg.y, cg.scale)
+    } else {
+        store.group(selected.gid)
+    }
+    // Диалог переименования комбо-группы
+    var renameFor by remember { mutableStateOf<Int?>(null) }
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
 
@@ -630,20 +641,109 @@ fun EditBar(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.horizontalScroll(rememberScrollState())
             ) {
-                val chipIds = if (showP2) LayoutStore.GroupId.entries else listOf(
+                // Обычные блоки (у комбо — свои чипы, по числу групп)
+                val baseIds = if (showP2) LayoutStore.GroupId.entries else listOf(
                     LayoutStore.GroupId.DPAD,
                     LayoutStore.GroupId.AB,
-                    LayoutStore.GroupId.META,
-                    LayoutStore.GroupId.COMBO
+                    LayoutStore.GroupId.META
                 )
-                chipIds.forEach { gid ->
+                baseIds.forEach { gid ->
                     FilterChip(
-                        selected = gid == selected,
-                        onClick = { onSelectGroup(gid) },
+                        selected = !selected.isCombo && gid == selected.gid,
+                        onClick = { onSelect(BlockRef(gid)) },
                         label = {
                             Text(LayoutStore.title(gid), style = MaterialTheme.typography.labelLarge)
                         }
                     )
+                }
+                // Чип каждой комбо-группы + создание новой
+                store.comboGroups.forEachIndexed { i, cg ->
+                    FilterChip(
+                        selected = selected.isCombo && selected.comboIdx == i,
+                        onClick = { onSelect(BlockRef(LayoutStore.GroupId.COMBO, i)) },
+                        label = {
+                            Text(cg.name, style = MaterialTheme.typography.labelLarge)
+                        }
+                    )
+                }
+                if (!showP2) {
+                    FilterChip(
+                        selected = false,
+                        onClick = {
+                            val idx = store.addComboGroup()
+                            onSelect(BlockRef(LayoutStore.GroupId.COMBO, idx))
+                        },
+                        label = { Text("+ Группа", style = MaterialTheme.typography.labelLarge) }
+                    )
+                }
+            }
+            // Контекстная строка выбранного блока
+            when {
+                selected.isCombo -> {
+                    val cg = store.comboGroups.getOrElse(selected.comboIdx) { store.comboGroups[0] }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            cg.name,
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1
+                        )
+                        TextButton(onClick = { renameFor = selected.comboIdx }) {
+                            Text("Переименовать")
+                        }
+                        if (store.comboGroups.size > 1) {
+                            TextButton(onClick = {
+                                if (store.removeComboGroup(selected.comboIdx)) {
+                                    onSelect(BlockRef(LayoutStore.GroupId.COMBO, 0))
+                                }
+                            }) {
+                                Text("Удалить", color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                    Text(
+                        "Тяните кнопку — порядок в группе или перенос в другую группу; " +
+                            "рамку или пустое место — двигать/масштабировать группу.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                selected.gid == LayoutStore.GroupId.AB -> {
+                    // Частичное скрытие кластера: скрытая пара не рисуется
+                    // и не занимает места, оставшаяся подтягивается рамкой
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            "Скрыть:",
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = store.isAbHidden(LayoutStore.AB_MAIN),
+                            onClick = {
+                                store.setAbHidden(
+                                    LayoutStore.AB_MAIN,
+                                    !store.isAbHidden(LayoutStore.AB_MAIN)
+                                )
+                            },
+                            label = { Text("Пару A/B", style = MaterialTheme.typography.labelLarge) }
+                        )
+                        FilterChip(
+                            selected = store.isAbHidden(LayoutStore.AB_TURBO),
+                            onClick = {
+                                store.setAbHidden(
+                                    LayoutStore.AB_TURBO,
+                                    !store.isAbHidden(LayoutStore.AB_TURBO)
+                                )
+                            },
+                            label = { Text("Турбо A′ B′", style = MaterialTheme.typography.labelLarge) }
+                        )
+                    }
                 }
             }
             Row(
@@ -651,16 +751,59 @@ fun EditBar(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    "«%s» %d%%".format(LayoutStore.title(selected), (g.scale * 100).toInt()),
+                    "«%s» %d%%".format(
+                        if (selected.isCombo) {
+                            store.comboGroups.getOrElse(selected.comboIdx) { store.comboGroups[0] }.name
+                        } else {
+                            LayoutStore.title(selected.gid)
+                        },
+                        (g.scale * 100).toInt()
+                    ),
                     style = MaterialTheme.typography.labelMedium
                 )
                 Slider(
                     value = g.scale,
                     valueRange = LayoutStore.MIN_SCALE..LayoutStore.MAX_SCALE,
-                    onValueChange = { store.updateGroup(selected, g.copy(scale = it)) },
+                    onValueChange = {
+                        if (selected.isCombo) {
+                            store.updateComboGroupPos(selected.comboIdx, g.x, g.y, it)
+                        } else {
+                            store.updateGroup(selected.gid, g.copy(scale = it))
+                        }
+                    },
                     modifier = Modifier.weight(1f)
                 )
             }
+        }
+    }
+
+    renameFor?.let { idx ->
+        val cg = store.comboGroups.getOrNull(idx)
+        if (cg == null) {
+            renameFor = null
+        } else {
+            var name by remember(idx) { mutableStateOf(cg.name) }
+            AlertDialog(
+                onDismissRequest = { renameFor = null },
+                title = { Text("Название группы") },
+                text = {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        singleLine = true,
+                        label = { Text("Название") }
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        store.renameComboGroup(idx, name)
+                        renameFor = null
+                    }) { Text("Сохранить") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { renameFor = null }) { Text("Отмена") }
+                }
+            )
         }
     }
 }

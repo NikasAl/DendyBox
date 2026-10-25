@@ -50,6 +50,7 @@ import com.dendybox.app.input.GamepadInput
 import com.dendybox.app.input.InputState
 import com.dendybox.app.saves.SaveManager
 import com.dendybox.app.settings.SettingsStore
+import com.dendybox.app.ui.controls.BlockRef
 import com.dendybox.app.ui.controls.ComboStore
 import com.dendybox.app.ui.controls.ControlsLayer
 import com.dendybox.app.ui.controls.DpadLayer
@@ -83,8 +84,9 @@ fun GameScreen(
     ComboStore.disabledProvider = { layoutStore.combosOff }
     val editing = screen == Screen.EDIT
 
-    // Какой блок редактируется (выделяется касанием, масштаб — слайдером/щипком)
-    var editTarget by remember { mutableStateOf(LayoutStore.GroupId.DPAD) }
+    // Какой блок редактируется (выделяется касанием, масштаб — слайдером/щипком).
+    // BlockRef: обычная группа ИЛИ комбо-группа №i — комбо-кнопок теперь несколько
+    var editTarget by remember { mutableStateOf(BlockRef(LayoutStore.GroupId.DPAD)) }
 
     // Локальный режим «2 игрока» — второй джойстик на том же экране
     val twoLocal by SettingsStore.twoLocal.collectAsState()
@@ -220,8 +222,8 @@ fun GameScreen(
                 DpadLayer(
                     store = layoutStore,
                     editing = true,
-                    selected = editTarget,
-                    onSelect = { editTarget = LayoutStore.GroupId.DPAD },
+                    selected = editTarget.gid,
+                    onSelect = { editTarget = BlockRef(LayoutStore.GroupId.DPAD) },
                     enabled = false,
                     onBits = {}
                 )
@@ -235,8 +237,8 @@ fun GameScreen(
                     DpadLayer(
                         store = layoutStore,
                         editing = true,
-                        selected = editTarget,
-                        onSelect = { editTarget = LayoutStore.GroupId.DPAD2 },
+                        selected = editTarget.gid,
+                        onSelect = { editTarget = BlockRef(LayoutStore.GroupId.DPAD2) },
                         enabled = false,
                         onBits = {},
                         p2Style = true
@@ -258,7 +260,7 @@ fun GameScreen(
                     EditBar(
                         store = layoutStore,
                         selected = editTarget,
-                        onSelectGroup = { editTarget = it },
+                        onSelect = { editTarget = it },
                         onDone = { onScreen(Screen.GAME) },
                         showP2 = twoLocal
                     )
