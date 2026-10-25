@@ -72,21 +72,71 @@
       { "file": "t_tmnt_tournament.nes",  "title": "Черепашки Ниндзя Турнир",
         "combos": [
           { "name": "Ультра", "steps": [
-            { "b": "DOWN", "d": 0 },
-            { "b": "RIGHT", "d": 100 },
-            { "b": "B", "d": 100 }
+            { "b": "DOWN", "d": 0, "h": 100 },
+            { "b": "DOWN", "w": ["RIGHT"], "d": 50, "h": 100, "anchor": "press" },
+            { "b": "RIGHT", "d": 50, "h": 100, "anchor": "press" },
+            { "b": "B", "d": 0, "h": 150 }
           ] },
           { "name": "Разбег-пинок", "steps": [
-            { "b": "RIGHT", "d": 0 },
-            { "b": "RIGHT", "d": 100 },
-            { "b": "A", "d": 100 }
+            { "b": "RIGHT", "d": 0, "h": 50 },
+            { "b": "RIGHT", "d": 50, "h": 100 },
+            { "b": "A", "d": 50, "h": 100, "anchor": "press" }
           ] },
           { "name": "Разбег-локоть", "steps": [
-            { "b": "RIGHT", "d": 0 },
-            { "b": "RIGHT", "d": 100 },
-            { "b": "B", "d": 100 }
+            { "b": "RIGHT", "d": 0, "h": 50 },
+            { "b": "RIGHT", "d": 50, "h": 100 },
+            { "b": "B", "d": 50, "h": 100, "anchor": "press" }
           ] },
-          { "name": "Зарядка B", "steps": [ { "b": "B", "d": 0, "h": 500 } ] }
+          { "name": "Зарядка B", "steps": [
+            { "b": "DOWN", "w": ["LEFT"], "d": 0, "h": 500 },
+            { "b": "DOWN", "w": ["LEFT"], "d": 0, "h": 500 },
+            { "b": "DOWN", "w": ["LEFT"], "d": 0, "h": 500 },
+            { "b": "DOWN", "w": ["LEFT"], "d": 0, "h": 500 },
+            { "b": "RIGHT", "w": ["B"], "d": 0, "h": 150 }
+          ] },
+          { "name": "Торнадо", "steps": [
+            { "b": "DOWN", "d": 0, "h": 500 },
+            { "b": "DOWN", "d": 0, "h": 500 },
+            { "b": "DOWN", "d": 0, "h": 500 },
+            { "b": "DOWN", "d": 0, "h": 500 },
+            { "b": "DOWN", "w": ["LEFT"], "d": 0, "h": 100 },
+            { "b": "LEFT", "d": 50, "h": 100, "anchor": "press" },
+            { "b": "A", "d": 50, "h": 100, "anchor": "press" }
+          ] },
+          { "name": "Пятка", "steps": [
+            { "b": "DOWN", "d": 0, "h": 500 },
+            { "b": "DOWN", "d": 0, "h": 500 },
+            { "b": "DOWN", "d": 0, "h": 500 },
+            { "b": "DOWN", "d": 0, "h": 500 },
+            { "b": "UP", "w": ["A"], "d": 0, "h": 150 }
+          ] },
+          { "name": "Сальто", "steps": [
+            { "b": "DOWN", "d": 0, "h": 500 },
+            { "b": "DOWN", "d": 0, "h": 500 },
+            { "b": "DOWN", "d": 0, "h": 500 },
+            { "b": "DOWN", "d": 0, "h": 500 },
+            { "b": "UP", "w": ["B"], "d": 0, "h": 150 }
+          ] },
+          { "name": "Огненное дыхание", "steps": [
+            { "b": "DOWN", "d": 0, "h": 100 },
+            { "b": "DOWN", "w": ["RIGHT"], "d": 50, "h": 100, "anchor": "press" },
+            { "b": "RIGHT", "d": 50, "h": 100, "anchor": "press" },
+            { "b": "A", "d": 0, "h": 150 }
+          ] },
+          { "name": "Вихрь", "steps": [
+            { "b": "RIGHT", "d": 0, "h": 100 },
+            { "b": "DOWN", "d": 50, "h": 100, "anchor": "press" },
+            { "b": "LEFT", "d": 50, "h": 100, "anchor": "press" },
+            { "b": "B", "d": 50, "h": 150, "anchor": "press" }
+          ] },
+          { "name": "Пламя по земле", "steps": [
+            { "b": "RIGHT", "d": 0, "h": 100 },
+            { "b": "RIGHT", "w": ["DOWN"], "d": 50, "h": 100, "anchor": "press" },
+            { "b": "DOWN", "d": 50, "h": 100, "anchor": "press" },
+            { "b": "DOWN", "w": ["LEFT"], "d": 50, "h": 100, "anchor": "press" },
+            { "b": "LEFT", "d": 50, "h": 100, "anchor": "press" },
+            { "b": "B", "d": 0, "h": 150 }
+          ] }
         ]
       }
     ]
