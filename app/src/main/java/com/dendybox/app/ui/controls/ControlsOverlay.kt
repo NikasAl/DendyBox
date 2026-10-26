@@ -419,9 +419,11 @@ private fun moveGroupBy(
 @Composable
 fun EditorSurface(store: LayoutStore, selected: BlockRef) {
     val dpadBaseR = SettingsStore.dpadSize.value
-    // Кнопки корпуса расширяют группу META: зажим движения — по её габаритам
-    val deviceSkinId by SettingsStore.deviceSkin.collectAsState()
-    val metaGadget = DeviceSkins.byId(deviceSkinId).enabled
+    // Скин «Гаджет» расширяет группу META кнопками корпуса SAVE/LOAD:
+    // зажим движения — по её габаритам. Корпус — часть скина кнопок
+    // (DeviceSkins.forControlSkin), отдельной настройки больше нет
+    val controlSkinId by SettingsStore.controlSkin.collectAsState()
+    val metaGadget = DeviceSkins.forControlSkin(controlSkinId).enabled
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val parentPx = IntSize(constraints.maxWidth, constraints.maxHeight)
         val density = LocalDensity.current
@@ -553,13 +555,13 @@ fun ControlsLayer(
         val skin = ControlSkins.byId(SettingsStore.controlSkin.collectAsState().value)
         // Слайдер «Видимость» двигает и картинку-подложку блока (imgBlock)
         val opacity by SettingsStore.controlsOpacity.collectAsState()
-        // Корпусный скин «Гаджет»: в группе META появляются кнопки корпуса
-        // SAVE/LOAD (SPECS_META_GADGET) — и в игре, и в редакторе. Без корпуса
-        // группа та же, что всегда (инвариант дефолтного вида). Hit-test читает
-        // флаг НА МОМЕНТ СОБЫТИЯ (rememberUpdatedState — бинд живёт дольше
-        // рекомпозиций), отрисовка — на момент композиции
-        val deviceSkinId by SettingsStore.deviceSkin.collectAsState()
-        val metaGadget = DeviceSkins.byId(deviceSkinId).enabled
+        // Корпусный скин «Гаджет» (корпус — часть скина кнопок): в группе META
+        // появляются кнопки корпуса SAVE/LOAD (SPECS_META_GADGET) — и в игре,
+        // и в редакторе. С прочими скинами группа та же, что всегда (инвариант
+        // дефолтного вида). Hit-test читает флаг НА МОМЕНТ СОБЫТИЯ
+        // (rememberUpdatedState — бинд живёт дольше рекомпозиций), отрисовка —
+        // на момент композиции
+        val metaGadget = DeviceSkins.forControlSkin(skin.id).enabled
         val currentMetaGadget by rememberUpdatedState(metaGadget)
 
         // Блоки слоя. Кластер A/B в игре скрывается целиком, если скрыты

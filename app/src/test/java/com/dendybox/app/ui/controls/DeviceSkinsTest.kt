@@ -42,6 +42,29 @@ class DeviceSkinsTest {
     }
 
     @Test
+    fun `корпус — часть скина кнопок и есть только у гаджета`() {
+        // скин «Гаджет» подразумевает корпус (единый дизайн), остальные — нет
+        assertSame(
+            DeviceSkins.byId("gadget"),
+            DeviceSkins.forControlSkin(ControlSkins.GADGET_ID)
+        )
+        for (skin in ControlSkins.ALL.filter { it.id != ControlSkins.GADGET_ID }) {
+            assertFalse(
+                "${skin.id}: корпус должен отсутствовать",
+                DeviceSkins.forControlSkin(skin.id).enabled
+            )
+            assertSame(
+                "${skin.id}: фолбэк — «нет корпуса»",
+                DeviceSkins.DEFAULT,
+                DeviceSkins.forControlSkin(skin.id)
+            )
+        }
+        // неизвестный/пустой id — «нет корпуса»
+        assertFalse(DeviceSkins.forControlSkin("неизвестный").enabled)
+        assertFalse(DeviceSkins.forControlSkin("").enabled)
+    }
+
+    @Test
     fun `гаджет включён и отличается от нет`() {
         val gadget = DeviceSkins.byId("gadget")
         assertTrue(gadget.enabled)

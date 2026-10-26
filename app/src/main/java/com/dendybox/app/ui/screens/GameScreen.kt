@@ -95,12 +95,13 @@ fun GameScreen(
     // Реактивное состояние звука для кнопки Mute (иконка меняется на ходу,
     // в т.ч. если звук выключили через «Настройки»)
     val soundOn by SettingsStore.sound.collectAsState()
-    // Скин «корпуса» (гаджет-дизайн): живой — корпус появляется/исчезает
-    // без перезапуска игры; при первом включении «Гаджета» один раз
-    // применяется его пресет раскладки (флаг в prefs — повторные
-    // включения и перемещения блоков не перекрываются)
-    val deviceSkinId by SettingsStore.deviceSkin.collectAsState()
-    val gadgetSkinActive = DeviceSkins.byId(deviceSkinId).enabled
+    // Скин кнопок: у «Гаджета» есть КОРПУС (DeviceSkins.forControlSkin) —
+    // живой, корпус появляется/исчезает без перезапуска игры; при первом
+    // включении «Гаджета» один раз применяется его пресет раскладки
+    // (флаг в prefs — повторные включения и перемещения блоков не
+    // перекрываются)
+    val controlSkinId by SettingsStore.controlSkin.collectAsState()
+    val gadgetSkinActive = DeviceSkins.forControlSkin(controlSkinId).enabled
     LaunchedEffect(gadgetSkinActive) {
         if (gadgetSkinActive) layoutStore.applyGadgetPresetOnce()
     }
@@ -131,15 +132,16 @@ fun GameScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Слой корпуса (гаджет-скин): рисуется ВЫШЕ игровой поверхности
-        // (закрывает только чёрные поля letterbox — «окно» вырезается ровно
-        // по кадру) и НИЖЕ меню/крестовины/кнопок. Без pointerInput —
-        // касания проходят сквозь слой: роутинг, зоны нажатий и перемещаемость
-        // групп не меняются. Дефолт (skin "none") слой не рисует вовсе.
+        // Слой корпуса (часть скина «Гаджет»): рисуется ВЫШЕ игровой
+        // поверхности (закрывает только чёрные поля letterbox — «окно»
+        // вырезается ровно по кадру) и НИЖЕ меню/крестовины/кнопок.
+        // Без pointerInput — касания проходят сквозь слой: роутинг, зоны
+        // нажатий и перемещаемость групп не меняются. У прочих скинов
+        // корпуса нет — слой не рисует вовсе.
         if (started && screen in setOf(Screen.GAME, Screen.EDIT, Screen.PAUSE)) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val frame = engine.frameRect(constraints.maxWidth, constraints.maxHeight)
-                DeviceShellLayer(frame, DeviceSkins.byId(deviceSkinId))
+                DeviceShellLayer(frame, DeviceSkins.forControlSkin(controlSkinId))
             }
         }
 

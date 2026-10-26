@@ -72,7 +72,6 @@ import com.dendybox.app.saves.SaveManager
 import com.dendybox.app.settings.SettingsStore
 import com.dendybox.app.ui.controls.BlockRef
 import com.dendybox.app.ui.controls.ControlSkins
-import com.dendybox.app.ui.controls.DeviceSkins
 import com.dendybox.app.ui.controls.LayoutStore
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -387,27 +386,19 @@ fun SettingsPanel(
                 opacity, 0.2f, 0.9f
             ) { SettingsStore.setControlsOpacity(it) }
 
-            // Скин кнопок: применяется ко ВСЕМ контролам сразу, в т.ч. на живом
-            // игровом экране (кнопки/крестовина собирают SettingsStore.controlSkin)
+            // Скин: применяется ко ВСЕМ контролам сразу, в т.ч. на живом
+            // игровом экране (кнопки/крестовина собирают SettingsStore.controlSkin).
+            // КОРПУС — часть скина: у «Гаджета» он есть (единый дизайн с
+            // крестовиной и кнопками), у остальных скинов корпуса нет.
+            // При первом выборе «Гаджета» применяется его пресет раскладки
+            // (один раз; блоки остаются перемещаемыми)
             val skinId by SettingsStore.controlSkin.collectAsState()
             SettingSkinChips(
-                "Скин кнопок",
-                "Форма и цвет всех контролов; меняется сразу, без перезапуска игры",
+                "Скин",
+                "Вид всех контролов и корпус вокруг кадра игры (у «Гаджета»); " +
+                    "меняется сразу, без перезапуска игры",
                 skinId
             ) { SettingsStore.setControlSkin(it) }
-
-            // Скин «корпуса»: декоративный слой вокруг кадра (гаджет-дизайн).
-            // Касания, зоны нажатий и раскладка не затрагиваются; дефолт «Нет» —
-            // классический вид. При первом выборе «Гаджета» применяется его
-            // пресет раскладки (один раз; блоки остаются перемещаемыми)
-            val deviceSkinId by SettingsStore.deviceSkin.collectAsState()
-            SettingDeviceChips(
-                "Корпус (гаджет)",
-                "Декоративный корпус вокруг кадра игры: тело, рамка экрана, динамики. " +
-                    "На нажатия и раскладку не влияет; «Гаджет» один раз применит свой " +
-                    "пресет раскладки (блоки потом можно двигать в редакторе)",
-                deviceSkinId
-            ) { SettingsStore.setDeviceSkin(it) }
 
             SettingSwitch(
                 "Звук",
@@ -525,57 +516,6 @@ private fun SettingSkinChips(
                                     .border(2.dp, skin.border, CircleShape)
                             )
                         }
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SettingDeviceChips(
-    title: String,
-    subtitle: String,
-    selectedId: String,
-    onSelect: (String) -> Unit
-) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Text(title, style = MaterialTheme.typography.bodyLarge)
-        Text(
-            subtitle,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Row(
-            Modifier
-                .horizontalScroll(rememberScrollState())
-                .padding(top = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            DeviceSkins.ALL.forEach { skin ->
-                FilterChip(
-                    selected = selectedId == skin.id,
-                    onClick = { onSelect(skin.id) },
-                    label = { Text(skin.title) },
-                    // Мини-превью корпуса: скруглённый прямоугольник цвета тела
-                    // с тёмной рамкой-безелем; у «Нет» — только контур
-                    leadingIcon = {
-                        val shape = RoundedCornerShape(5.dp)
-                        Box(
-                            Modifier
-                                .size(20.dp, 14.dp)
-                                .clip(shape)
-                                .then(
-                                    if (skin.enabled) Modifier.background(skin.bodyColor)
-                                    else Modifier
-                                )
-                                .border(
-                                    if (skin.enabled) 3.dp else 1.5.dp,
-                                    if (skin.enabled) skin.bezelColor
-                                    else MaterialTheme.colorScheme.outline,
-                                    shape
-                                )
-                        )
                     }
                 )
             }

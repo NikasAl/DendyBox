@@ -126,6 +126,9 @@ object ControlSkins {
     /** Идентификатор скина по умолчанию (совпадает с ключом в SharedPreferences). */
     const val DEFAULT_ID = "classic"
 
+    /** Идентификатор скина «Гаджет» — единственного с корпусом (см. DeviceSkins). */
+    const val GADGET_ID = "gadget"
+
     /** Набор скинов; ПЕРВЫЙ — классика: по нему resolve'ится неизвестный id. */
     val ALL: List<ControlSkin> =
         listOf(classic(), neon(), pixel(), dark(), dendy(), carbon(), arcade(), gadget())
@@ -343,9 +346,12 @@ object ControlSkins {
     // остаются только комбо-кнопкам (белые с красной рамкой и тёмной
     // подписью) и подсветке нажатых стрелок крестовины.
     // Скин НЕ влияет на геометрию: зоны нажатий — по спекам, как у всех.
+    // Единственный скин С КОРПУСОМ (DeviceSkins.forControlSkin) — подложка
+    // вокруг кадра игры составляет с ним единый дизайн; у остальных
+    // скинов корпуса нет.
     // ------------------------------------------------------------------
     private fun gadget() = ControlSkin(
-        id = "gadget",
+        id = GADGET_ID,
         title = "Гаджет",
         shapeMain = SkinShape.CIRCLE,
         shapeMeta = SkinShape.PILL,

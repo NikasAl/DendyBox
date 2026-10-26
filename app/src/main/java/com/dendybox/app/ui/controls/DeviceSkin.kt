@@ -23,6 +23,11 @@ import androidx.compose.ui.unit.dp
  * динамиков опциональны ([DeviceSkin.speakerCount], у «Гаджета» выключены —
  * отверстия в полях мешали и убраны по обратной связи).
  *
+ * КОРПУС — ЧАСТЬ СКИНА КНОПОК: отдельного тумблера больше нет, корпус
+ * выбирается вместе со скином ([DeviceSkins.forControlSkin]) — скин
+ * «Гаджет» подразумевает подложку-корпус (без неё крестовина выглядит
+ * плохо — единый дизайн), у остальных скинов корпуса нет.
+ *
  * Инварианты (как у [ControlSkin]):
  *  - слой ТОЛЬКО рисуется: ни одного pointerInput/кликабельного модификатора —
  *    роутинг касаний, зоны нажатий и перемещаемость групп не затрагиваются
@@ -32,7 +37,7 @@ import androidx.compose.ui.unit.dp
  *  - скин НЕ влияет на логику, размеры и раскладку контролов: группы как
  *    двигались, так и двигаются; дефолт (id "none", [DeviceSkins.DEFAULT])
  *    слой не рисует вовсе — классический вид без изменений;
- *  - смена скина живая: id хранится в SettingsStore.deviceSkin (StateFlow),
+ *  - смена скина живая: id хранится в SettingsStore.controlSkin (StateFlow),
  *    корпус появляется/исчезает без перезапуска игры.
  *
  * Совместимость с «фон — прокрутка игры»: игровая поверхность (SurfaceView)
@@ -88,6 +93,14 @@ object DeviceSkins {
     /** Скин по id; неизвестный/пустой id → «нет корпуса» (например, старый билд). */
     fun byId(id: String): DeviceSkin = ALL.firstOrNull { it.id == id } ?: ALL.first()
 
+    /**
+     * Корпус для скина кнопок [controlSkinId]: корпус — часть скина, у
+     * «Гаджета» ([ControlSkins.GADGET_ID]) он есть, у остальных скинов нет.
+     * Неизвестный id — «нет корпуса» (тот же фолбэк, что у [byId]).
+     */
+    fun forControlSkin(controlSkinId: String): DeviceSkin =
+        if (controlSkinId == ControlSkins.GADGET_ID) byId(ControlSkins.GADGET_ID) else DEFAULT
+
     private fun none() = DeviceSkin(
         id = NONE_ID,
         title = "Нет",
@@ -103,9 +116,11 @@ object DeviceSkins {
     // «Гаджет» — корпус карманной консоли по референсу: светлое тело,
     // тёмный безель экрана. Динамики УБРАНЫ (speakerCount = 0): отверстия
     // в свободных полосах мешали и не читались — решение по обратной связи.
+    // Корпус выбирается ВМЕСТЕ со скином кнопок (forControlSkin) —
+    // id совпадает с ControlSkins.GADGET_ID.
     // ------------------------------------------------------------------
     private fun gadget() = DeviceSkin(
-        id = "gadget",
+        id = ControlSkins.GADGET_ID,
         title = "Гаджет",
         enabled = true,
         bodyColor = Color(0xFFF2F1EC),

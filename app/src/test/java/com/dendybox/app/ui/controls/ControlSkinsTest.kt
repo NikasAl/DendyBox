@@ -83,6 +83,9 @@ class ControlSkinsTest {
     @Test
     fun `гаджет — единственный скин с каптионами и переопределением турбо`() {
         val gadget = ControlSkins.byId("gadget")
+        // константа id совпадает со скином (корпус выбирается по ней)
+        assertEquals("gadget", ControlSkins.GADGET_ID)
+        assertSame(gadget, ControlSkins.byId(ControlSkins.GADGET_ID))
         assertTrue(gadget.captions)
         assertEquals("TURBO", gadget.captionFor("TA", "A′"))
         assertEquals("TURBO", gadget.captionFor("TB", "B′"))
