@@ -30,10 +30,10 @@ class ControlSkinsTest {
     // ------------------------------------------------------------------
 
     @Test
-    fun `в наборе семь скинов с уникальными идентификаторами`() {
-        assertEquals(7, ControlSkins.ALL.size)
-        assertEquals(7, ControlSkins.ALL.map { it.id }.toSet().size)
-        assertEquals(7, ControlSkins.ALL.map { it.title }.toSet().size)
+    fun `в наборе восемь скинов с уникальными идентификаторами`() {
+        assertEquals(8, ControlSkins.ALL.size)
+        assertEquals(8, ControlSkins.ALL.map { it.id }.toSet().size)
+        assertEquals(8, ControlSkins.ALL.map { it.title }.toSet().size)
     }
 
     @Test
@@ -74,6 +74,35 @@ class ControlSkinsTest {
     fun `турбо и комбо рамки классики отличаются от обычной рамки`() {
         assertNotEquals(classic.border, classic.turboBorder)
         assertNotEquals(classic.border, classic.comboBorder)
+    }
+
+    // ------------------------------------------------------------------
+    // «Гаджет» — пакет-скин с каптионами (подписи НАД кнопками)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `гаджет — единственный скин с каптионами и переопределением турбо`() {
+        val gadget = ControlSkins.byId("gadget")
+        assertTrue(gadget.captions)
+        assertEquals("TURBO A", gadget.captionFor("TA", "A′"))
+        assertEquals("TURBO B", gadget.captionFor("TB", "B′"))
+        // без переопределения — стандартная подпись спека
+        assertEquals("A", gadget.captionFor("A", "A"))
+        assertEquals("START", gadget.captionFor("START", "START"))
+        // остальные скины каптионов не включают — дефолтный вид не затронут
+        for (s in ControlSkins.ALL.filter { it.id != "gadget" }) {
+            assertFalse("${s.id}: каптионы должны быть выключены", s.captions)
+            assertTrue("${s.id}: карта каптионов пуста", s.captionLabels.isEmpty())
+        }
+    }
+
+    @Test
+    fun `каптион без переопределения возвращается к подписи спека у всех скинов`() {
+        for (s in ControlSkins.ALL) {
+            assertEquals("A", s.captionFor("A", "A"))
+            assertEquals("SEL", s.captionFor("SELECT", "SEL"))
+            assertEquals("X", s.captionFor("неизвестный", "X"))
+        }
     }
 
     // ------------------------------------------------------------------

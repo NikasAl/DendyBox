@@ -67,7 +67,17 @@ data class ControlSkin(
     /** Картинки кнопок: id спека ("A"…"SELECT") → drawable; комбо-кнопки ("K*") не картиночные. */
     val imgButtons: Map<String, Int> = emptyMap(),
     /** Картинка-подложка под всю группу (панель) или null. */
-    val imgBlock: Int? = null
+    val imgBlock: Int? = null,
+    /**
+     * Каптионы: подписи кнопок рисуются НАД кнопкой (на «корпусе»), а не
+     * внутри неё — как надписи на теле гаджета. Касаются только физических
+     * кнопок [IMAGEABLE_IDS]; у комбо-кнопок ("K*") подписи всегда внутри
+     * (они пользовательские и длинные). Каптион — ЧИСТАЯ отрисовка: не
+     * входит в зону нажатия и не меняет геометрию (hit-test читает спеки).
+     */
+    val captions: Boolean = false,
+    /** Тексты каптионов поверх стандартных подписей спеков: id → текст. */
+    val captionLabels: Map<String, String> = emptyMap()
 ) {
     /** Все цвета скина одним списком — для инвариантов тестов и перебора. */
     fun colors(): List<Color> = listOf(
@@ -82,6 +92,13 @@ data class ControlSkin(
      */
     fun buttonImage(specId: String): Int? =
         if (specId in IMAGEABLE_IDS) imgButtons[specId] else null
+
+    /**
+     * Текст каптиона кнопки [specId]: переопределение из [captionLabels]
+     * (например «TURBO A» для турбо-кнопки) или стандартная подпись спека.
+     */
+    fun captionFor(specId: String, fallback: String): String =
+        captionLabels[specId] ?: fallback
 
     companion object {
         /** Id спеков, которым разрешена картинка (см. [buttonImage]). */
@@ -106,7 +123,7 @@ object ControlSkins {
 
     /** Набор скинов; ПЕРВЫЙ — классика: по нему resolve'ится неизвестный id. */
     val ALL: List<ControlSkin> =
-        listOf(classic(), neon(), pixel(), dark(), dendy(), carbon(), arcade())
+        listOf(classic(), neon(), pixel(), dark(), dendy(), carbon(), arcade(), gadget())
 
     /** Классический скин (= дефолт). */
     val DEFAULT: ControlSkin get() = byId(DEFAULT_ID)
@@ -308,6 +325,48 @@ object ControlSkins {
             "TB" to R.drawable.skin_arcade_btn_yellow,
             "START" to R.drawable.skin_arcade_pill,
             "SELECT" to R.drawable.skin_arcade_pill
+        )
+    )
+
+    // ------------------------------------------------------------------
+    // «Гаджет» — пакет-скин по референсу «карманная консоль»: светлое тело,
+    // тёмная крестовина, красные круглые B/A (и турбо), светло-серые
+    // пилюли SELECT/START. Подписи рисуются КАПТИОНАМИ над кнопками
+    // (на «корпусе»), турбо подписываются «TURBO A»/«TURBO B». Параметри-
+    // ческие цвета остаются только комбо-кнопкам (белые с красной рамкой
+    // и тёмной подписью) и подсветке нажатых стрелок крестовины.
+    // Скин НЕ влияет на геометрию: зоны нажатий — по спекам, как у всех.
+    // ------------------------------------------------------------------
+    private fun gadget() = ControlSkin(
+        id = "gadget",
+        title = "Гаджет",
+        shapeMain = SkinShape.CIRCLE,
+        shapeMeta = SkinShape.PILL,
+        fill = Color.White,
+        border = Color(0xFF3A3A42),
+        turboBorder = AccentRed,
+        comboBorder = AccentRed,
+        label = Color(0xFF3A3A42),
+        monospace = false,
+        dpadFill = Color.White,
+        dpadStroke = Color(0xFF3A3A42),
+        dpadArrow = Color(0xFF3A3A42),
+        dpadArrowActive = AccentRed,
+        dpadDot = Color(0xFF3A3A42),
+        dpadVisual = DpadVisual.TRIANGLES,
+        captions = true,
+        captionLabels = mapOf(
+            "TA" to "TURBO A",
+            "TB" to "TURBO B"
+        ),
+        imgDpad = R.drawable.skin_gadget_dpad,
+        imgButtons = mapOf(
+            "A" to R.drawable.skin_gadget_btn,
+            "B" to R.drawable.skin_gadget_btn,
+            "TA" to R.drawable.skin_gadget_btn,
+            "TB" to R.drawable.skin_gadget_btn,
+            "START" to R.drawable.skin_gadget_pill,
+            "SELECT" to R.drawable.skin_gadget_pill
         )
     )
 }

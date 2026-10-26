@@ -20,6 +20,10 @@ object SettingsStore {
     // Строка хранится здесь, ресолв в ControlSkin — в ui.controls (byId),
     // чтобы настройки не зависели от UI-слоя
     val controlSkin = MutableStateFlow("classic")
+    // Скин «корпуса» (декоративный слой вокруг кадра): идентификатор из
+    // DeviceSkins (none/gadget). Ресолв — в ui.controls (DeviceSkins.byId);
+    // дефолт "none" — корпус не рисуется, классический вид не затронут
+    val deviceSkin = MutableStateFlow(DEFAULT_DEVICE_SKIN)
     val twoLocal = MutableStateFlow(false)    // локальный режим «2 игрока» на одном экране
 
     fun init(ctx: Context) {
@@ -32,6 +36,7 @@ object SettingsStore {
         dpadSize.value = prefs.getFloat("dpadSize", 58f)
         controlsOpacity.value = prefs.getFloat("controlsOpacity", 0.55f)
         controlSkin.value = prefs.getString("controlSkin", "classic") ?: "classic"
+        deviceSkin.value = prefs.getString("deviceSkin", DEFAULT_DEVICE_SKIN) ?: DEFAULT_DEVICE_SKIN
         twoLocal.value = prefs.getBoolean("twoLocal", false)
     }
 
@@ -42,7 +47,11 @@ object SettingsStore {
     fun setDpadSize(v: Float) { dpadSize.value = v; edit().putFloat("dpadSize", v) }
     fun setControlsOpacity(v: Float) { controlsOpacity.value = v; edit().putFloat("controlsOpacity", v) }
     fun setControlSkin(v: String) { controlSkin.value = v; edit().putString("controlSkin", v) }
+    fun setDeviceSkin(v: String) { deviceSkin.value = v; edit().putString("deviceSkin", v) }
     fun setTwoLocal(v: Boolean) { twoLocal.value = v; edit().putBoolean("twoLocal", v) }
 
     private fun edit() = prefs.edit()
+
+    /** Дефолт скина корпуса — совпадает с DeviceSkins.NONE_ID (без зависимости от UI-слоя). */
+    private const val DEFAULT_DEVICE_SKIN = "none"
 }

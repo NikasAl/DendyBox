@@ -866,20 +866,42 @@ private fun GameButton(
                 modifier = Modifier.fillMaxSize()
             )
         }
-        Text(
-            text = spec.label,
-            color = skin.label.copy(alpha = alphas.label),
-            fontWeight = FontWeight.Bold,
-            fontFamily = if (skin.monospace) FontFamily.Monospace else null,
-            fontSize = when {
-                // имя комбо-кнопки длинное — мелкий шрифт в две строки
-                isCombo -> 9.sp
-                sizeDp < 50f -> 10.sp
-                else -> 18.sp
-            },
-            textAlign = if (isCombo) TextAlign.Center else TextAlign.Unspecified,
-            lineHeight = if (isCombo) 10.sp else TextUnit.Unspecified
-        )
+        // Каптионный режим скина: подпись живёт НАД кнопкой (на «корпусе»),
+        // внутри кнопки текста нет. Касаются только физических кнопок —
+        // у комбо-кнопок подписи пользовательские, всегда внутри.
+        // Каптион — чистая отрисовка (Text без pointerInput, вне бокса):
+        // зона нажатия остаётся ровно кнопкой, hit-test не меняется
+        val showCaption = skin.captions && spec.id in ControlSkin.IMAGEABLE_IDS
+        if (showCaption) {
+            Text(
+                text = skin.captionFor(spec.id, spec.label),
+                color = skin.label.copy(alpha = alphas.label),
+                fontWeight = FontWeight.Bold,
+                fontFamily = if (skin.monospace) FontFamily.Monospace else null,
+                fontSize = 9.sp,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = (-15).dp)
+            )
+        }
+        if (!showCaption) {
+            Text(
+                text = spec.label,
+                color = skin.label.copy(alpha = alphas.label),
+                fontWeight = FontWeight.Bold,
+                fontFamily = if (skin.monospace) FontFamily.Monospace else null,
+                fontSize = when {
+                    // имя комбо-кнопки длинное — мелкий шрифт в две строки
+                    isCombo -> 9.sp
+                    sizeDp < 50f -> 10.sp
+                    else -> 18.sp
+                },
+                textAlign = if (isCombo) TextAlign.Center else TextAlign.Unspecified,
+                lineHeight = if (isCombo) 10.sp else TextUnit.Unspecified
+            )
+        }
     }
 }
 

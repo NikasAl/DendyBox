@@ -428,9 +428,35 @@ class LayoutStore(private val prefs: SharedPreferences) {
         prefs.edit().putBoolean(PREF_2P_PRESET, true).apply()
     }
 
+    /**
+     * Разовый пресет пакета-скина «Гаджет» (референс — корпус консоли):
+     * крестовина слева, кластер A/B справа, Select/Start по центру под
+     * кадром, комбо-группа №0 — вверх по центру (чтобы не сталкивалась
+     * с META). Вызывается при первом включении корпусного скина; масштабы
+     * групп сохраняются, позиции зажимаются санитизацией. Повторные
+     * включения и переключения скинов раскладку НЕ трогают — блоки
+     * остаются перемещаемыми, пользовательские позиции не перекрываются:
+     * комбо-группа сдвигается только если стоит на заводской точке.
+     */
+    fun applyGadgetPresetOnce() {
+        if (prefs.getBoolean(PREF_GADGET_PRESET, false)) return
+        dpad = sanitize(Group(0.13f, 0.75f, dpad.scale))
+        ab = sanitize(Group(0.87f, 0.70f, ab.scale))
+        meta = sanitize(Group(0.5f, 0.895f, meta.scale))
+        val first = comboGroups[0]
+        if (first.x == DEF_COMBO.x && first.y == DEF_COMBO.y) {
+            comboGroups = comboGroups.mapIndexed { i, cg ->
+                if (i == 0) cg.copy(y = 0.115f) else cg
+            }
+        }
+        persist()
+        prefs.edit().putBoolean(PREF_GADGET_PRESET, true).apply()
+    }
+
     companion object {
         private const val PREF_KEY = "layout_v3"
         private const val PREF_2P_PRESET = "layout_2p_preset_v1"
+        private const val PREF_GADGET_PRESET = "layout_gadget_preset_v1"
 
         /** Подблок кластера A/B: основная пара A/B. */
         const val AB_MAIN = "main"

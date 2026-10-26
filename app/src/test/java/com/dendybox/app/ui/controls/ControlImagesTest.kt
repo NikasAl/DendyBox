@@ -86,6 +86,31 @@ class ControlImagesTest {
         }
     }
 
+    // ------------------------------------------------------------------
+    // «Гаджет» — пакет-скин: картинки закреплены за ресурсами
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `гаджет — картинки крестовины и всех физических кнопок`() {
+        val g = skin("gadget")
+        assertEquals(R.drawable.skin_gadget_dpad, g.imgDpad)
+        for (btn in ControlSkin.IMAGEABLE_IDS) {
+            assertNotNull("gadget: кнопка $btn", g.buttonImage(btn))
+        }
+        assertNull("gadget: без подложки — тело рисует DeviceShellLayer", g.imgBlock)
+    }
+
+    @Test
+    fun `гаджет — картинки закреплены за конкретными ресурсами`() {
+        val g = skin("gadget")
+        assertEquals(R.drawable.skin_gadget_btn, g.buttonImage("A"))
+        assertEquals(R.drawable.skin_gadget_btn, g.buttonImage("B"))
+        assertEquals(R.drawable.skin_gadget_btn, g.buttonImage("TA"))
+        assertEquals(R.drawable.skin_gadget_btn, g.buttonImage("TB"))
+        assertEquals(R.drawable.skin_gadget_pill, g.buttonImage("START"))
+        assertEquals(R.drawable.skin_gadget_pill, g.buttonImage("SELECT"))
+    }
+
     @Test
     fun `подложка целым блоком только у карбона`() {
         assertNotNull(skin("carbon").imgBlock)

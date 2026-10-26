@@ -103,4 +103,81 @@ class LayoutStoreTest {
         prefs.edit().putString("layout_v3", "это не json").commit()
         assertTrue(LayoutStore(prefs).combosOff.isEmpty())
     }
+
+    // ------------------------------------------------------------------
+    // Пресет пакета-скина «Гаджет» (applyGadgetPresetOnce)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `гаджет-пресет расставляет блоки по корпусу и применяется один раз`() {
+        val prefs = FakePrefs()
+        val store = LayoutStore(prefs)
+
+        store.applyGadgetPresetOnce()
+        assertEquals(0.13f, store.dpad.x, 1e-4f)
+        assertEquals(0.75f, store.dpad.y, 1e-4f)
+        assertEquals(0.87f, store.ab.x, 1e-4f)
+        assertEquals(0.70f, store.ab.y, 1e-4f)
+        assertEquals(0.5f, store.meta.x, 1e-4f)
+        assertEquals(0.895f, store.meta.y, 1e-4f)
+        // заводская комбо-группа уезжает вверх по центру — свободна зона META
+        assertEquals(0.115f, store.comboGroups[0].y, 1e-4f)
+        assertEquals(0.5f, store.comboGroups[0].x, 1e-4f)
+
+        // «перезапуск» видит пресет (переживает prefs)
+        val reloaded = LayoutStore(prefs)
+        assertEquals(0.895f, reloaded.meta.y, 1e-4f)
+
+        // повторный вызов раскладку НЕ перекрывает: подвигали крестовину —
+        // пресет больше ничего не меняет
+        reloaded.updateGroup(LayoutStore.GroupId.DPAD, LayoutStore.Group(0.3f, 0.3f, 1f))
+        reloaded.applyGadgetPresetOnce()
+        assertEquals(0.3f, reloaded.dpad.x, 1e-6f)
+        assertEquals(0.3f, reloaded.dpad.y, 1e-6f)
+        assertEquals(0.895f, reloaded.meta.y, 1e-6f)
+    }
+
+    @Test
+    fun `гаджет-пресет сохраняет масштабы и не трогает передвинутую комбо-группу`() {
+        val store = LayoutStore(FakePrefs())
+        store.updateGroup(LayoutStore.GroupId.DPAD, LayoutStore.Group(0.2f, 0.8f, 1.7f))
+        store.updateGroup(LayoutStore.GroupId.AB, LayoutStore.Group(0.8f, 0.6f, 0.9f))
+        store.updateGroup(LayoutStore.GroupId.META, LayoutStore.Group(0.5f, 0.5f, 1.3f))
+        // комбо-группа передвинута пользователем — не на заводской точке
+        store.updateComboGroupPos(0, 0.7f, 0.4f, 1.1f)
+
+        store.applyGadgetPresetOnce()
+        // позиции по корпусу, масштабы — СВОИ (не перекрываются)
+        assertEquals(1.7f, store.dpad.scale, 1e-6f)
+        assertEquals(0.9f, store.ab.scale, 1e-6f)
+        assertEquals(1.3f, store.meta.scale, 1e-6f)
+        assertEquals(0.13f, store.dpad.x, 1e-4f)
+        assertEquals(0.87f, store.ab.x, 1e-4f)
+        // пользовательская комбо-группа не двигается
+        assertEquals(0.7f, store.comboGroups[0].x, 1e-6f)
+        assertEquals(0.4f, store.comboGroups[0].y, 1e-6f)
+        assertEquals(1.1f, store.comboGroups[0].scale, 1e-6f)
+        // значения в допустимых границах (санитизация)
+        for (g in listOf(store.dpad, store.ab, store.meta)) {
+            assertTrue(g.x in 0.02f..0.98f && g.y in 0.02f..0.98f)
+            assertTrue(g.scale in LayoutStore.MIN_SCALE..LayoutStore.MAX_SCALE)
+        }
+    }
+
+    @Test
+    fun `гаджет-пресет переживёт экспорт-импорт и сброс раскладки возвращает заводскую`() {
+        val prefs = FakePrefs()
+        val store = LayoutStore(prefs)
+        store.applyGadgetPresetOnce()
+
+        val other = LayoutStore(FakePrefs())
+        assertTrue(other.applyJson(store.toJson()))
+        assertEquals(0.115f, other.comboGroups[0].y, 1e-4f)
+        assertEquals(0.895f, other.meta.y, 1e-4f)
+
+        // сброс — к заводской раскладке (не к гаджет-пресету)
+        other.resetAll()
+        assertEquals(LayoutStore.DEF_META.y, other.meta.y, 1e-6f)
+        assertEquals(LayoutStore.DEF_COMBO_GROUP, other.comboGroups[0])
+    }
 }
