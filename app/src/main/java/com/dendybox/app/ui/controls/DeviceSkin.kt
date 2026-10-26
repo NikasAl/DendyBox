@@ -77,6 +77,26 @@ data class DeviceSkin(
 ) {
     /** Все цвета скина одним списком — для инвариантов тестов. */
     fun colors(): List<Color> = listOf(bodyColor, bodyStroke, bezelColor, speakerColor)
+
+    /**
+     * Скин с альфами, умноженными на [alpha] (0..1, значения вне — зажимаются):
+     * слайдер «Видимость» применяется и к корпусу — тело, контур, безель
+     * (и динамики, если включены) растворяются вместе с кнопками. RGB не
+     * трогается; у выключенного скина ("none") цвета не меняются — слой и
+     * так не рисуется. При alpha = 1 вид идентичен исходному скину.
+     */
+    fun tinted(alpha: Float): DeviceSkin {
+        if (!enabled) return this
+        val a = alpha.coerceIn(0f, 1f)
+        if (a >= 1f) return this
+        fun tint(c: Color) = c.copy(alpha = c.alpha * a)
+        return copy(
+            bodyColor = tint(bodyColor),
+            bodyStroke = tint(bodyStroke),
+            bezelColor = tint(bezelColor),
+            speakerColor = tint(speakerColor)
+        )
+    }
 }
 
 object DeviceSkins {
@@ -136,12 +156,19 @@ object DeviceSkins {
  * GameScreen — прямоугольник кадра [framePx] (px поверхности, та же
  * математика, что у движка). НЕ содержит pointerInput — слой прозрачен
  * для касаний, весь ввод обслуживают слои выше (меню, крестовина, кнопки).
+ *
+ * [alpha] — вес слоя из слайдера «Видимость» ([ControlAlphas.shellAlpha]):
+ * при базовом значении слайдера корпус рисуется как спроектирован
+ * (полностью непрозрачные краски), к минимуму — равномерно растворяется
+ * вместе с кнопками; выше базы плотнее не становится (краски и так
+ * непрозрачны). Подложка (imgBlock) и текстуры кнопок/крестовины движутся
+ * тем же слайдером своими весами — весь «стиль корпуса» прозрачен целиком.
  */
 @Composable
-fun DeviceShellLayer(framePx: RectF, skin: DeviceSkin) {
+fun DeviceShellLayer(framePx: RectF, skin: DeviceSkin, alpha: Float = 1f) {
     if (!skin.enabled) return
     Canvas(Modifier.fillMaxSize()) {
-        drawShell(size, framePx, skin)
+        drawShell(size, framePx, skin.tinted(alpha))
     }
 }
 

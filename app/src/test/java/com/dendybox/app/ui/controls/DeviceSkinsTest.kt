@@ -109,4 +109,49 @@ class DeviceSkinsTest {
         assertFalse(DeviceSkins.DEFAULT.enabled)
         assertFalse(DeviceSkins.byId("none").enabled)
     }
+
+    // ------------------------------------------------------------------
+    // Прозрачность корпуса: слайдер «Видимость» применяется к слоям (tinted)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `tinted при полной альфе возвращает тот же скин`() {
+        val gadget = DeviceSkins.byId("gadget")
+        assertSame(gadget, gadget.tinted(1f))
+        assertSame(gadget, gadget.tinted(5f)) // зажим сверху — тот же объект
+    }
+
+    @Test
+    fun `tinted растворяет все краски корпуса не трогая RGB`() {
+        val gadget = DeviceSkins.byId("gadget")
+        val faded = gadget.tinted(0.4f)
+        assertEquals(0.4f, faded.bodyColor.alpha, 1f / 255f + 1e-6f)
+        assertEquals(0.4f, faded.bodyStroke.alpha, 1f / 255f + 1e-6f)
+        assertEquals(0.4f, faded.bezelColor.alpha, 1f / 255f + 1e-6f)
+        assertEquals(0.4f, faded.speakerColor.alpha, 1f / 255f + 1e-6f)
+        // RGB сохранён (тело остаётся тем же цветом, просто прозрачнее)
+        assertEquals(gadget.bodyColor.copy(alpha = 1f), faded.bodyColor.copy(alpha = 1f))
+        assertEquals(gadget.bezelColor.copy(alpha = 1f), faded.bezelColor.copy(alpha = 1f))
+        // геометрия не тронута — прозрачность не меняет размеры
+        assertEquals(gadget.bodyMarginDp, faded.bodyMarginDp, 1e-6f)
+        assertEquals(gadget.bezelWidthDp, faded.bezelWidthDp, 1e-6f)
+    }
+
+    @Test
+    fun `tinted монотонен и зажат снизу нулём`() {
+        val gadget = DeviceSkins.byId("gadget")
+        val a20 = gadget.tinted(0.2f)
+        val a40 = gadget.tinted(0.4f)
+        assertTrue(a20.bodyColor.alpha < a40.bodyColor.alpha)
+        assertEquals(0f, gadget.tinted(0f).bodyColor.alpha, 1e-6f)
+        assertEquals(0f, gadget.tinted(-3f).bodyColor.alpha, 1e-6f)
+    }
+
+    @Test
+    fun `tinted не меняет выключенный скин`() {
+        // «нет корпуса» не рисуется — цвета не трогаются в принципе
+        val none = DeviceSkins.DEFAULT
+        assertSame(none, none.tinted(0.3f))
+        assertTrue(none.tinted(0.3f).colors().all { it.alpha == 1f })
+    }
 }

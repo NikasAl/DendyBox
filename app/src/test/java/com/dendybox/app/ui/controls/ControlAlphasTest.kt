@@ -108,4 +108,26 @@ class ControlAlphasTest {
         assertEquals(0.9f, ControlAlphas.of(0.9f).dpadStroke, 1e-6f)
         assertEquals(1f, ControlAlphas.of(1f).dpadStroke, 1e-6f)
     }
+
+    // ------------------------------------------------------------------
+    // Корпус движется тем же слайдером (вес слоя DeviceShell)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `вес корпуса равен 1 при базовом слайдере — вид как спроектирован`() {
+        assertEquals(1f, ControlAlphas.shellAlpha(ControlAlphas.OPACITY_BASE), 1e-6f)
+    }
+
+    @Test
+    fun `вес корпуса растёт со слайдером и не выходит за единицу`() {
+        // ниже базы — пропорционально прозрачнее вместе с кнопками
+        assertEquals(0.2f / ControlAlphas.OPACITY_BASE, ControlAlphas.shellAlpha(0.2f), 1e-6f)
+        assertTrue(ControlAlphas.shellAlpha(0.2f) < ControlAlphas.shellAlpha(0.4f))
+        // выше базы плотнее не становится: краски корпуса и так непрозрачны
+        assertEquals(1f, ControlAlphas.shellAlpha(0.9f), 1e-6f)
+        // за краями диапазона — без выхода за 0..1
+        assertEquals(0f, ControlAlphas.shellAlpha(0f), 1e-6f)
+        assertEquals(0f, ControlAlphas.shellAlpha(-1f), 1e-6f)
+        assertEquals(1f, ControlAlphas.shellAlpha(5f), 1e-6f)
+    }
 }

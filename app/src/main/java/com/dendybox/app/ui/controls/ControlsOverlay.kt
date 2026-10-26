@@ -773,6 +773,16 @@ internal data class ControlAlphas(
         /** Базовое (проектное) значение слайдера — при нём k = 1. */
         const val OPACITY_BASE = 0.55f
 
+        /**
+         * Вес слоя КОРПУСА из слайдера «Видимость»: при базовом значении —
+         * 1 (корпус как спроектирован), ниже — пропорционально прозрачнее,
+         * выше — плотнее не становится (краски корпуса непрозрачны).
+         * Считается той же шкалой, что и все альфы [of] — корпус движется
+         * слайдером вместе с кнопками.
+         */
+        fun shellAlpha(opacity: Float): Float =
+            (opacity / OPACITY_BASE).coerceIn(0f, 1f)
+
         fun of(opacity: Float): ControlAlphas {
             val k = (opacity / OPACITY_BASE).coerceIn(0f, 1f / OPACITY_BASE)
             return ControlAlphas(

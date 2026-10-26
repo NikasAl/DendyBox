@@ -36,6 +36,7 @@ import com.dendybox.app.saves.SaveManager
 import com.dendybox.app.settings.SettingsStore
 import com.dendybox.app.ui.controls.BlockRef
 import com.dendybox.app.ui.controls.ComboStore
+import com.dendybox.app.ui.controls.ControlAlphas
 import com.dendybox.app.ui.controls.ControlsLayer
 import com.dendybox.app.ui.controls.DeviceShellLayer
 import com.dendybox.app.ui.controls.DeviceSkins
@@ -118,11 +119,18 @@ fun GameScreen(
         // вырезается ровно по кадру) и НИЖЕ меню/крестовины/кнопок.
         // Без pointerInput — касания проходят сквозь слой: роутинг, зоны
         // нажатий и перемещаемость групп не меняются. У прочих скинов
-        // корпуса нет — слой не рисует вовсе.
+        // корпуса нет — слой не рисует вовсе. Слайдер «Видимость» двигает
+        // и корпус: при базовом значении вид как спроектирован, ниже —
+        // корпус растворяется вместе с кнопками (ControlAlphas.shellAlpha)
         if (started && screen in setOf(Screen.GAME, Screen.EDIT, Screen.PAUSE)) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val frame = engine.frameRect(constraints.maxWidth, constraints.maxHeight)
-                DeviceShellLayer(frame, DeviceSkins.forControlSkin(controlSkinId))
+                val opacity by SettingsStore.controlsOpacity.collectAsState()
+                DeviceShellLayer(
+                    frame,
+                    DeviceSkins.forControlSkin(controlSkinId),
+                    alpha = ControlAlphas.shellAlpha(opacity)
+                )
             }
         }
 
