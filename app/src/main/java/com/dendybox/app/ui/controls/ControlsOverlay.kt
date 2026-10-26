@@ -789,6 +789,94 @@ internal data class ControlAlphas(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Визуальное решение кнопки — чистая функция (тестируемая на JVM)
+// ---------------------------------------------------------------------------
+
+/**
+ * Готовый вид кнопки: форма, заливка, рамка, подпись. Считается из скина,
+ * слайдера «Видимость» и состояния нажатия — [buttonLook]. GameButton
+ * только переносит эти значения в Compose-модификаторы, логики в нём нет.
+ *
+ * Инвариант «комбо-кнопки в гармонии со скином»: у комбо-кнопок ("K*")
+ * вид следует за активным [ControlSkin] точно как у обычных кнопок — форма
+ * [ControlSkin.shapeMain], заливка [ControlSkin.fill], рамка
+ * [ControlSkin.comboBorder], подпись [ControlSkin.label] (у комбо — всегда
+ * ВНУТРИ кнопки: каптионы для них не включаются никогда), картинок нет.
+ * Слайдер «Видимость» двигает их заливку/рамку/подпись теми же формулами,
+ * что у всех; нажатие подсвечивает тем же бустом (+0.3 к альфе заливки).
+ */
+internal data class ButtonLook(
+    /** Картинка скина (res/drawable) или null — параметрический рендер. */
+    val imageRes: Int?,
+    /** Форма кнопки (до приведения к Compose-Shape). */
+    val shape: SkinShape,
+    /** Заливка с альфой (параметрика; при картинке не применяется). */
+    val fill: Color,
+    /** Цвет рамки с альфой. */
+    val borderColor: Color,
+    /** Толщина рамки, dp. */
+    val borderWidthDp: Float,
+    /** Цвет подписи с альфой. */
+    val labelColor: Color,
+    /**
+     * Каптионный режим скина: подпись живёт НАД кнопкой, внутри текста нет.
+     * Касается только физических кнопок ([ControlSkin.IMAGEABLE_IDS]);
+     * комбо-кнопки всегда с подписью внутри ([ControlSkin.captions] на них
+     * не действует — подписи пользовательские).
+     */
+    val captionMode: Boolean,
+    /** Текст каптиона (при [captionMode]); пустой каптион не рисуется. */
+    val captionText: String
+)
+
+/**
+ * Визуальное решение кнопки [specId] (подпись спека — [specLabel]) в скине
+ * [skin] при значении слайдера «Видимость» [opacity] и состоянии [pressed].
+ * ЧИСТАЯ функция: без Compose-состояния — одинаковый вход даёт одинаковый
+ * вид, контракт закреплён тестами (ButtonLookTest).
+ */
+internal fun buttonLook(
+    skin: ControlSkin,
+    specId: String,
+    specLabel: String,
+    opacity: Float,
+    pressed: Boolean
+): ButtonLook {
+    val isTurbo = specId == "TA" || specId == "TB"
+    val isCombo = specId.startsWith("K") // программируемая комбо-кнопка
+    val isPill = specId in PILL_IDS
+    // Слайдер двигает и рамку, и подпись вместе с заливкой (см. ControlAlphas)
+    val alphas = ControlAlphas.of(opacity)
+    // Заливка: нажатие подсвечивает бустом, турбо слегка приглушено
+    val fillAlpha = when {
+        pressed -> minOf(1f, opacity + 0.3f)
+        isTurbo -> opacity * 0.75f
+        else -> opacity
+    }
+    val captionMode = skin.captions && specId in ControlSkin.IMAGEABLE_IDS
+    val captionText = if (captionMode) skin.captionFor(specId, specLabel) else ""
+    return ButtonLook(
+        imageRes = skin.buttonImage(specId),
+        shape = if (isPill) skin.shapeMeta else skin.shapeMain,
+        fill = skin.fill.copy(alpha = fillAlpha),
+        borderColor = when {
+            isTurbo -> skin.turboBorder.copy(alpha = alphas.borderTurbo)
+            // комбо-кнопки отличаются рамкой (в классике — красной, как турбо)
+            isCombo -> skin.comboBorder.copy(alpha = alphas.borderMain)
+            else -> skin.border.copy(alpha = alphas.borderMain)
+        },
+        borderWidthDp = when {
+            isTurbo -> 1f
+            isCombo -> 1.5f
+            else -> 2f
+        },
+        labelColor = skin.label.copy(alpha = alphas.label),
+        captionMode = captionMode,
+        captionText = captionText
+    )
+}
+
 @Composable
 private fun GameButton(
     spec: CtrlSpec,
@@ -810,8 +898,6 @@ private fun GameButton(
     pressed: Boolean
 ) {
     val opacity by SettingsStore.controlsOpacity.collectAsState()
-    // Слайдер двигает и рамку, и подпись вместе с заливкой (см. ControlAlphas)
-    val alphas = ControlAlphas.of(opacity)
     // Скин: форма/цвета/шрифт. collectAsState — смена скина перекрашивает
     // кнопку на живом игровом экране, без рестарта
     val skin = ControlSkins.byId(SettingsStore.controlSkin.collectAsState().value)
@@ -822,46 +908,28 @@ private fun GameButton(
     val currentComboDrag by rememberUpdatedState(onComboDragPx)
     val currentX by rememberUpdatedState(xPx)
     val currentY by rememberUpdatedState(yPx)
-    val isTurbo = spec.id == "TA" || spec.id == "TB"
-    val isCombo = spec.id.startsWith("K") // программируемая комбо-кнопка
-    // Пилюли: SELECT/START и системные PAUSE/MUTE/EDIT/SAVE/LOAD
-    val isPill = spec.id in PILL_IDS
-    // Форму задаёт скин (круг для A/B, капсула для SEL/START в классике);
+    // Вид кнопки — чистая функция [buttonLook] (скин + слайдер + нажатие):
+    // форма/цвета/рамка/каптионы для ВСЕХ кнопок, включая комбо
+    val look = buttonLook(skin, spec.id, spec.label, opacity, pressed)
+    // длинное имя комбо-кнопки — мелкий шрифт в две строки (см. Text ниже)
+    val isCombo = spec.id.startsWith("K")
+    // Форму задаёт скин (круг для A/B, капсула для системных пилюль в классике);
     // в «Пикселе» всё угловатое. Логика нажатий и размеры от формы не зависят
-    val shape = when (if (isPill) skin.shapeMeta else skin.shapeMain) {
+    val shape = when (look.shape) {
         SkinShape.CIRCLE -> CircleShape
         SkinShape.PILL -> RoundedCornerShape(12.dp)
         SkinShape.SQUARE -> RoundedCornerShape(3.dp)
     }
 
-    val fillAlpha = when {
-        pressed -> minOf(1f, opacity + 0.3f)
-        isTurbo -> opacity * 0.75f
-        else -> opacity
-    }
-
     // Картинка контрола или null — тогда параметрические форма/цвета.
     // Разветвление ТОЛЬКО визуальное: размер, зона касаний и логика нажатий
     // одинаковы (hit-test читает спеки, а не скин)
-    val imgRes = skin.buttonImage(spec.id)
+    val imgRes = look.imageRes
     val decoration = if (imgRes == null) {
         Modifier
             .clip(shape)
-            .background(skin.fill.copy(alpha = fillAlpha))
-            .border(
-                when {
-                    isTurbo -> 1.dp
-                    isCombo -> 1.5.dp
-                    else -> 2.dp
-                },
-                when {
-                    isTurbo -> skin.turboBorder.copy(alpha = alphas.borderTurbo)
-                    // комбо-кнопки отличаются рамкой (в классике — красной, как турбо)
-                    isCombo -> skin.comboBorder.copy(alpha = alphas.borderMain)
-                    else -> skin.border.copy(alpha = alphas.borderMain)
-                },
-                shape
-            )
+            .background(look.fill)
+            .border(look.borderWidthDp.dp, look.borderColor, shape)
     } else {
         Modifier // картинку рисует Image внутри — форма/цвета не применяются
     }
@@ -935,19 +1003,17 @@ private fun GameButton(
                 modifier = Modifier.fillMaxSize()
             )
         }
-        // Каптионный режим скина: подпись живёт НАД кнопкой (на «корпусе»),
-        // внутри кнопки текста нет — ДАЖЕ если каптион пуст («A»/«B» гаджета:
-        // буква запечена в фото-кнопку, дублировать её текстом нельзя).
-        // Касаются только физических кнопок — у комбо-кнопок подписи
-        // пользовательские, всегда внутри.
+        // Каптионный режим скина (решение в [buttonLook]): подпись живёт
+        // НАД кнопкой (на «корпусе»), внутри кнопки текста нет — ДАЖЕ если
+        // каптион пуст («A»/«B» гаджета: буква запечена в фото-кнопку,
+        // дублировать её текстом нельзя). Касаются только физических
+        // кнопок — у комбо-кнопок подписи пользовательские, всегда внутри.
         // Каптион — чистая отрисовка (Text без pointerInput, вне бокса):
         // зона нажатия остаётся ровно кнопкой, hit-test не меняется
-        val captionMode = skin.captions && spec.id in ControlSkin.IMAGEABLE_IDS
-        val captionText = if (captionMode) skin.captionFor(spec.id, spec.label) else ""
-        if (captionText.isNotEmpty()) {
+        if (look.captionText.isNotEmpty()) {
             Text(
-                text = captionText,
-                color = skin.label.copy(alpha = alphas.label),
+                text = look.captionText,
+                color = look.labelColor,
                 fontWeight = FontWeight.Bold,
                 fontFamily = if (skin.monospace) FontFamily.Monospace else null,
                 fontSize = 9.sp,
@@ -958,10 +1024,10 @@ private fun GameButton(
                     .offset(y = (-15).dp)
             )
         }
-        if (!captionMode) {
+        if (!look.captionMode) {
             Text(
                 text = spec.label,
-                color = skin.label.copy(alpha = alphas.label),
+                color = look.labelColor,
                 fontWeight = FontWeight.Bold,
                 fontFamily = if (skin.monospace) FontFamily.Monospace else null,
                 fontSize = when {
