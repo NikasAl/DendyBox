@@ -71,11 +71,17 @@ object GamepadInput {
     var onComboPress: ((id: String, down: Boolean, port: Int) -> Unit)? = null
 
     /**
-     * Кнопки КОРПУСА гаджета (SAVE/LOAD, см. SPECS_META_GADGET): выставляется
-     * игровым экраном; down — квик-сейв/лоад (up игнорируется — это кнопки-
-     * действия, не джойстик: в InputState не попадают, на порт не влияют).
+     * Системные кнопки-действия (PAUSE/MUTE/EDIT/SAVE/LOAD — группы
+     * «Пауза+Mute» и «Редактор+Save+Load», см. SPECS_PAUSE_MUTE и
+     * SPECS_EDIT_SAVE_LOAD): выставляется игровым экраном; down —
+     * выполняет действие (меню паузы / звук / редактор раскладки /
+     * квик-сейв / квик-лоад), up игнорируется — это кнопки-действия,
+     * не джойстик: в InputState не попадают, на порт не влияют.
      */
     var onSystemPress: ((id: String, down: Boolean) -> Unit)? = null
+
+    /** Id системных кнопок-действий (маршрутизируются в [onSystemPress]). */
+    val SYSTEM_IDS = setOf("PAUSE", "MUTE", "EDIT", "SAVE", "LOAD")
 
     /** Кнопка [id] нажата на порту [port] (турбо — только P1). */
     private fun handlePress(id: String, down: Boolean, port: Int) {
@@ -86,8 +92,8 @@ object GamepadInput {
             id == "TB" -> if (port == 0) InputState.turboActiveB = down
             id == "SELECT" -> InputState.press(InputState.SELECT, down, port)
             id == "START" -> InputState.press(InputState.START, down, port)
-            // кнопки корпуса гаджета: квик-сейв/лоад — действие на нажатие
-            id == "SAVE" || id == "LOAD" -> if (down) onSystemPress?.invoke(id, down)
+            // системные кнопки: действие на нажатие (см. [onSystemPress])
+            id in SYSTEM_IDS -> if (down) onSystemPress?.invoke(id, down)
             // «K<u…>»/«Kp<N>» — программируемая комбо-кнопка (см. ComboStore)
             id.length > 1 && id[0] == 'K' -> onComboPress?.invoke(id.substring(1), down, port)
         }

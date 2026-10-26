@@ -95,21 +95,33 @@ val SPECS_META = listOf(
 )
 
 /**
- * Кнопки КОРПУСА гаджета: квик-сейв/лоад слева от SELECT/START — один ряд,
- * как на корпусе референса. Показываются ТОЛЬКО с корпусным скином
- * ([DeviceSkins] «гаджет»): без корпуса раскладка и вид прежние (2 пилюли).
- * Нажатия идут через тот же маршрутизатор касаний, но в InputState не
- * попадают — [GamepadInput.onSystemPress] вызывает квик-сейв/лоад движка.
+ * Группа «Пауза+Mute» — системные кнопки-действия тем же рядом, что
+ * SELECT/START (пилюли 46dp, шаг 58dp). Заменяют прежние неподвижные
+ * кнопки верхней панели: PAUSE открывает меню паузы, MUTE переключает
+ * звук. Нажатия идут через тот же маршрутизатор касаний (FingerRouter,
+ * подсветка), но в InputState не попадают — [GamepadInput.onSystemPress]
+ * выполняет действие на нажатие.
  */
-val SPECS_META_GADGET = listOf(
-    CtrlSpec("SAVE", "SAVE", -87f, 0f, 46f),
-    CtrlSpec("LOAD", "LOAD", -29f, 0f, 46f),
-    CtrlSpec("SELECT", "SEL", 29f, 0f, 46f),
-    CtrlSpec("START", "START", 87f, 0f, 46f)
+val SPECS_PAUSE_MUTE = listOf(
+    CtrlSpec("PAUSE", "PAUSE", -29f, 0f, 46f),
+    CtrlSpec("MUTE", "MUTE", 29f, 0f, 46f)
 )
 
-/** Спеки-пилюли: SELECT/START и кнопки корпуса SAVE/LOAD (гаджет). */
-val PILL_IDS = setOf("SELECT", "START", "SAVE", "LOAD")
+/**
+ * Группа «Редактор+Save+Load» — системные кнопки-действия: EDIT открывает
+ * настройки управления (редактор раскладки), SAVE/LOAD — квик-сейв/лоад
+ * QUICK-слота (тем же путём, что раньше шла верхняя панель). Пилюли того
+ * же размера, что SELECT/START; у скина «Гаджет» SAVE/LOAD — фото-пилюли
+ * с каптионами, как на корпусе референса.
+ */
+val SPECS_EDIT_SAVE_LOAD = listOf(
+    CtrlSpec("EDIT", "EDIT", -58f, 0f, 46f),
+    CtrlSpec("SAVE", "SAVE", 0f, 0f, 46f),
+    CtrlSpec("LOAD", "LOAD", 58f, 0f, 46f)
+)
+
+/** Спеки-пилюли: SELECT/START и системные кнопки PAUSE/MUTE/EDIT/SAVE/LOAD. */
+val PILL_IDS = setOf("SELECT", "START", "PAUSE", "MUTE", "EDIT", "SAVE", "LOAD")
 
 /**
  * Блок на игровой поверхности: обычная группа ([gid]) или комбо-группа
@@ -129,6 +141,8 @@ private fun specsOf(id: LayoutStore.GroupId): List<CtrlSpec> = when (id) {
     LayoutStore.GroupId.AB -> SPECS_AB
     LayoutStore.GroupId.AB2 -> SPECS_AB2
     LayoutStore.GroupId.META -> SPECS_META
+    LayoutStore.GroupId.PAUSE_MUTE -> SPECS_PAUSE_MUTE
+    LayoutStore.GroupId.EDIT_SAVE_LOAD -> SPECS_EDIT_SAVE_LOAD
     else -> emptyList()
 }
 
@@ -144,13 +158,13 @@ fun specsAb(hidden: Set<String>): List<CtrlSpec> = SPECS_AB.filter { s ->
 
 /**
  * Спеки БЛОКА: комбо-группа №i, кластер A/B с учётом скрытых пар, прочие.
- * [metaGadget] — включены кнопки корпуса (SAVE/LOAD в группе META) —
- * читается на момент события, без корпуса группа та же.
+ * От скина корпуса НЕ зависят: SAVE/LOAD живут в своей группе
+ * «Редактор+Save+Load» и показываются всегда (у прочих скинов —
+ * параметрические пилюли).
  */
-internal fun specsFor(store: LayoutStore, ref: BlockRef, metaGadget: Boolean = false): List<CtrlSpec> = when {
+internal fun specsFor(store: LayoutStore, ref: BlockRef): List<CtrlSpec> = when {
     ref.isCombo -> comboSpecs(comboButtonsOf(store, ref.comboIdx))
     ref.gid == LayoutStore.GroupId.AB -> specsAb(store.abOff)
-    ref.gid == LayoutStore.GroupId.META && metaGadget -> SPECS_META_GADGET
     else -> specsOf(ref.gid)
 }
 
@@ -186,15 +200,16 @@ fun extentsAb(hidden: Set<String>): Extents {
 
 fun extentsDp(
     id: LayoutStore.GroupId,
-    dpadBaseRadiusDp: Float,
-    metaGadget: Boolean = false
+    dpadBaseRadiusDp: Float
 ): Extents = when (id) {
     LayoutStore.GroupId.AB -> extentsAb(emptySet())
     LayoutStore.GroupId.AB2 ->
         Extents(left = 68f, top = 32f, right = 68f, bottom = 32f)
-    LayoutStore.GroupId.META ->
-        if (metaGadget) Extents(110f, 23f, 110f, 23f)
-        else Extents(left = 52f, top = 23f, right = 52f, bottom = 23f)
+    LayoutStore.GroupId.META -> Extents(left = 52f, top = 23f, right = 52f, bottom = 23f)
+    // «Пауза+Mute» — две пилюли с шагом 58 (как META);
+    // «Редактор+Save+Load» — три пилюли: 58 до крайней + 23 радиус
+    LayoutStore.GroupId.PAUSE_MUTE -> Extents(left = 52f, top = 23f, right = 52f, bottom = 23f)
+    LayoutStore.GroupId.EDIT_SAVE_LOAD -> Extents(left = 81f, top = 23f, right = 81f, bottom = 23f)
     LayoutStore.GroupId.COMBO -> comboExtentsDp(ComboStore.effective().size)
     LayoutStore.GroupId.DPAD, LayoutStore.GroupId.DPAD2 -> Extents(
         left = dpadBaseRadiusDp,
@@ -217,13 +232,12 @@ internal fun blockGroup(store: LayoutStore, ref: BlockRef): LayoutStore.Group =
 internal fun blockExtents(
     store: LayoutStore,
     ref: BlockRef,
-    dpadBaseRadiusDp: Float,
-    metaGadget: Boolean = false
+    dpadBaseRadiusDp: Float
 ): Extents =
     when {
         ref.isCombo -> comboExtentsDp(comboButtonsOf(store, ref.comboIdx).size)
         ref.gid == LayoutStore.GroupId.AB -> extentsAb(store.abOff)
-        else -> extentsDp(ref.gid, dpadBaseRadiusDp, metaGadget)
+        else -> extentsDp(ref.gid, dpadBaseRadiusDp)
     }
 
 // ---------------------------------------------------------------------------
@@ -393,11 +407,10 @@ private fun moveGroupBy(
     zoom: Float,
     parentPx: IntSize,
     density: Density,
-    dpadBaseRadiusDp: Float,
-    metaGadget: Boolean = false
+    dpadBaseRadiusDp: Float
 ) {
     val g = blockGroup(store, ref)
-    val e = blockExtents(store, ref, dpadBaseRadiusDp, metaGadget)
+    val e = blockExtents(store, ref, dpadBaseRadiusDp)
     val l = with(density) { (e.left * g.scale).dp.toPx() / parentPx.width }.coerceAtMost(0.5f)
     val r = with(density) { (e.right * g.scale).dp.toPx() / parentPx.width }.coerceAtMost(0.5f)
     val t = with(density) { (e.top * g.scale).dp.toPx() / parentPx.height }.coerceAtMost(0.5f)
@@ -419,11 +432,6 @@ private fun moveGroupBy(
 @Composable
 fun EditorSurface(store: LayoutStore, selected: BlockRef) {
     val dpadBaseR = SettingsStore.dpadSize.value
-    // Скин «Гаджет» расширяет группу META кнопками корпуса SAVE/LOAD:
-    // зажим движения — по её габаритам. Корпус — часть скина кнопок
-    // (DeviceSkins.forControlSkin), отдельной настройки больше нет
-    val controlSkinId by SettingsStore.controlSkin.collectAsState()
-    val metaGadget = DeviceSkins.forControlSkin(controlSkinId).enabled
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val parentPx = IntSize(constraints.maxWidth, constraints.maxHeight)
         val density = LocalDensity.current
@@ -435,7 +443,7 @@ fun EditorSurface(store: LayoutStore, selected: BlockRef) {
                         if (pan == Offset.Zero && zoom == 1f) return@detectTransformGestures
                         moveGroupBy(
                             store, selected, pan.x, pan.y, zoom,
-                            parentPx, density, dpadBaseR, metaGadget
+                            parentPx, density, dpadBaseR
                         )
                     }
                 }
@@ -555,18 +563,12 @@ fun ControlsLayer(
         val skin = ControlSkins.byId(SettingsStore.controlSkin.collectAsState().value)
         // Слайдер «Видимость» двигает и картинку-подложку блока (imgBlock)
         val opacity by SettingsStore.controlsOpacity.collectAsState()
-        // Корпусный скин «Гаджет» (корпус — часть скина кнопок): в группе META
-        // появляются кнопки корпуса SAVE/LOAD (SPECS_META_GADGET) — и в игре,
-        // и в редакторе. С прочими скинами группа та же, что всегда (инвариант
-        // дефолтного вида). Hit-test читает флаг НА МОМЕНТ СОБЫТИЯ
-        // (rememberUpdatedState — бинд живёт дольше рекомпозиций), отрисовка —
-        // на момент композиции
-        val metaGadget = DeviceSkins.forControlSkin(skin.id).enabled
-        val currentMetaGadget by rememberUpdatedState(metaGadget)
 
         // Блоки слоя. Кластер A/B в игре скрывается целиком, если скрыты
         // ОБЕ пары; каждая комбо-группа — отдельный блок: в игре — только
-        // с кнопками, в редакторе — всегда (рамку можно поставить заранее)
+        // с кнопками, в редакторе — всегда (рамку можно поставить заранее).
+        // Системные группы «Пауза+Mute» и «Редактор+Save+Load» — всегда
+        // видимы (в P2-режиме их нет: системные действия общие)
         val blocks = if (p2Style) {
             listOf(BlockRef(LayoutStore.GroupId.AB2))
         } else {
@@ -575,6 +577,8 @@ fun ControlsLayer(
                     add(BlockRef(LayoutStore.GroupId.AB))
                 }
                 add(BlockRef(LayoutStore.GroupId.META))
+                add(BlockRef(LayoutStore.GroupId.PAUSE_MUTE))
+                add(BlockRef(LayoutStore.GroupId.EDIT_SAVE_LOAD))
                 store.comboGroups.indices.forEach { i ->
                     if (editing || comboButtonsOf(store, i).isNotEmpty()) {
                         add(BlockRef(LayoutStore.GroupId.COMBO, i))
@@ -614,7 +618,7 @@ fun ControlsLayer(
             val g = blockGroup(store, ref) // чтение state — рекомпозиция при изменении
             val cx = g.x * parentPx.width
             val cy = g.y * parentPx.height
-            val e = blockExtents(store, ref, 0f, metaGadget)
+            val e = blockExtents(store, ref, 0f)
             val lPx = with(density) { (e.left * g.scale).dp.toPx() }
             val tPx = with(density) { (e.top * g.scale).dp.toPx() }
             val rPx = with(density) { (e.right * g.scale).dp.toPx() }
@@ -652,7 +656,7 @@ fun ControlsLayer(
                             ref.bindName,
                             hitTest = { x, y ->
                                 hitTestButton(
-                                    specsFor(store, ref, currentMetaGadget),
+                                    specsFor(store, ref),
                                     blockGroup(store, ref), x, y, px, den
                                 )
                             },
@@ -682,13 +686,13 @@ fun ControlsLayer(
                         selected = selected == ref,
                         onSelect = { onSelect(ref) },
                         onDragPx = { dx, dy ->
-                            moveGroupBy(store, ref, dx, dy, 1f, parentPx, density, 0f, metaGadget)
+                            moveGroupBy(store, ref, dx, dy, 1f, parentPx, density, 0f)
                         }
                     )
                 }
             }
 
-            specsFor(store, ref, metaGadget).forEach { spec ->
+            specsFor(store, ref).forEach { spec ->
                 key(ref.bindName + spec.id) {
                     val sizePx = with(density) { (spec.size * g.scale).dp.toPx() }
                     val x = (cx + spec.dx * g.scale * density.density - sizePx / 2f).toInt()
@@ -703,7 +707,6 @@ fun ControlsLayer(
                         parentPx = parentPx,
                         density = density,
                         editing = editing,
-                        metaGadget = metaGadget,
                         onSelect = { onSelect(ref) },
                         // В редакторе комбо-кнопка тянется КАК КНОПКА: порядок
                         // в группе / перенос между группами (группу двигают
@@ -783,8 +786,6 @@ private fun GameButton(
     parentPx: IntSize,
     density: Density,
     editing: Boolean,
-    // Кнопки корпуса в группе META (SAVE/LOAD) — для зажима при перетаскивании
-    metaGadget: Boolean = false,
     onSelect: () -> Unit,
     // Редактор, комбо-кнопка: тянется САМА КНОПКА (порядок в группе /
     // перенос между группами, см. comboDragTo); палец — в координатах
@@ -807,11 +808,9 @@ private fun GameButton(
     val currentComboDrag by rememberUpdatedState(onComboDragPx)
     val currentX by rememberUpdatedState(xPx)
     val currentY by rememberUpdatedState(yPx)
-    // currentMetaGadget — как currentX/currentY: pointerInput живёт дольше рекомпозиций
-    val currentMetaGadget by rememberUpdatedState(metaGadget)
     val isTurbo = spec.id == "TA" || spec.id == "TB"
     val isCombo = spec.id.startsWith("K") // программируемая комбо-кнопка
-    // Пилюли: SELECT/START и кнопки корпуса SAVE/LOAD (гаджет)
+    // Пилюли: SELECT/START и системные PAUSE/MUTE/EDIT/SAVE/LOAD
     val isPill = spec.id in PILL_IDS
     // Форму задаёт скин (круг для A/B, капсула для SEL/START в классике);
     // в «Пикселе» всё угловатое. Логика нажатий и размеры от формы не зависят
@@ -897,7 +896,7 @@ private fun GameButton(
                                         change.consume()
                                         moveGroupBy(
                                             store, block, dragAmount.x, dragAmount.y, 1f,
-                                            parentPx, density, 0f, currentMetaGadget
+                                            parentPx, density, 0f
                                         )
                                     }
                                 )

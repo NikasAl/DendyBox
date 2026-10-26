@@ -104,10 +104,13 @@ data class ControlSkin(
     companion object {
         /**
          * Id спеков, которым разрешена картинка (см. [buttonImage]): кнопки
-         * джойстика (A/B/турбо, SELECT/START) и кнопки КОРПУСА гаджета
-         * (SAVE/LOAD — квик-сейв/лоад, см. SPECS_META_GADGET).
+         * джойстика (A/B/турбо, SELECT/START), системные кнопки-действия
+         * (PAUSE/MUTE/EDIT/SAVE/LOAD — группы «Пауза+Mute» и
+         * «Редактор+Save+Load», см. SPECS_PAUSE_MUTE/SPECS_EDIT_SAVE_LOAD).
          */
-        val IMAGEABLE_IDS = setOf("A", "B", "TA", "TB", "START", "SELECT", "SAVE", "LOAD")
+        val IMAGEABLE_IDS = setOf(
+            "A", "B", "TA", "TB", "START", "SELECT", "SAVE", "LOAD", "PAUSE", "MUTE", "EDIT"
+        )
 
         /**
          * Альфа картинки кнопки — та же механика, что у заливки обычной кнопки:
@@ -386,7 +389,12 @@ object ControlSkins {
             "START" to R.drawable.skin_gadget_pill,
             "SELECT" to R.drawable.skin_gadget_pill,
             "SAVE" to R.drawable.skin_gadget_pill,
-            "LOAD" to R.drawable.skin_gadget_pill
+            "LOAD" to R.drawable.skin_gadget_pill,
+            // системные кнопки — та же пилюля, что SELECT/START:
+            // единый вид ряда системных действий на корпусе
+            "PAUSE" to R.drawable.skin_gadget_pill,
+            "MUTE" to R.drawable.skin_gadget_pill,
+            "EDIT" to R.drawable.skin_gadget_pill
         )
     )
 }

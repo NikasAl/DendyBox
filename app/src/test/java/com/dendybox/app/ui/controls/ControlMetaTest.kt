@@ -6,109 +6,69 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Кнопки корпуса гаджета (SAVE/LOAD) в группе META — этап 4 гаджет-дизайна.
- * Ключевые инварианты:
- *  - БЕЗ корпусного скина группа META прежняя: 2 пилюли SELECT/START,
- *    те же спеки и границы — дефолтный вид и зоны нажатий не изменены;
- *  - С корпусом META превращается в ряд из ЧЕТЫРЁХ пилюль
- *    SAVE | LOAD | SELECT | START (как на корпусе референса) — тот же
- *    якорь/масштаб, рамка и зажим обнимают весь ряд;
- *  - SAVE/LOAD — кнопки-ДЕЙСТВИЯ: размер/зоны считаются теми же формулами,
- *    но в InputState они не попадают (маршрутизация — GamepadInput
- *    .onSystemPress, проверяется фактом id-ветки, см. GamepadInput).
+ * Группа META (Select/Start) — после переноса системных кнопок в отдельные
+ * группы «Пауза+Mute» и «Редактор+Save+Load» она БОЛЬШЕ НЕ ЗАВИСИТ от скина:
+ * SAVE/LOAD живут в своей группе (см. ControlSystemTest), META — всегда
+ * две пилюли SELECT/START. Ключевые инварианты:
+ *  - спеки/границы META прежние при ЛЮБОМ скине — дефолтный вид и зоны
+ *    нажатий не изменены;
+ *  - SELECT/START — пилюли одного размера, один ряд, ровные зазоры.
  */
 class ControlMetaTest {
 
     private fun store() = LayoutStore(FakePrefs())
 
-    // ------------------------------------------------------------------
-    // Дефолт не затронут
-    // ------------------------------------------------------------------
-
     @Test
-    fun `без корпуса спеки META прежние — две пилюли`() {
+    fun `спеки META прежние — две пилюли независимо от скина`() {
         assertEquals(listOf("SELECT", "START"), SPECS_META.map { it.id })
         assertEquals(listOf(46f, 46f), SPECS_META.map { it.size })
+        assertEquals(listOf(-29f, 29f), SPECS_META.map { it.dx })
+        assertEquals(listOf(0f, 0f), SPECS_META.map { it.dy })
         val s = store()
         assertEquals(SPECS_META, specsFor(s, BlockRef(GroupId.META)))
-        assertEquals(SPECS_META, specsFor(s, BlockRef(GroupId.META), metaGadget = false))
+        // и на пресете гаджета META не меняется — системные кнопки живут отдельно
+        s.applyGadgetPresetOnce()
+        assertEquals(SPECS_META, specsFor(s, BlockRef(GroupId.META)))
+    }
+
+    @Test
+    fun `границы META обнимают две пилюли`() {
         val e = extentsDp(GroupId.META, 0f)
+        // 29dp до центра пилюли + 23dp радиус
         assertEquals(52f, e.left, 1e-6f)
-        assertEquals(23f, e.top, 1e-6f)
         assertEquals(52f, e.right, 1e-6f)
-        assertEquals(23f, e.bottom, 1e-6f)
-    }
-
-    // ------------------------------------------------------------------
-    // Гаджет-вариант: ряд из четырёх пилюль
-    // ------------------------------------------------------------------
-
-    @Test
-    fun `с корпусом в META четыре пилюли SAVE LOAD SELECT START`() {
-        assertEquals(
-            listOf("SAVE", "LOAD", "SELECT", "START"),
-            SPECS_META_GADGET.map { it.id }
-        )
-        // одинаковые пилюли того же размера, что SELECT/START
-        assertEquals(listOf(46f, 46f, 46f, 46f), SPECS_META_GADGET.map { it.size })
-        // один ряд (dy = 0), шаг 58dp — тот же, что у дефолтного META
-        assertEquals(listOf(0f, 0f, 0f, 0f), SPECS_META_GADGET.map { it.dy })
-        assertEquals(listOf(-87f, -29f, 29f, 87f), SPECS_META_GADGET.map { it.dx })
-        val s = store()
-        val specs = specsFor(s, BlockRef(GroupId.META), metaGadget = true)
-        assertEquals(SPECS_META_GADGET, specs)
-    }
-
-    @Test
-    fun `границы META с корпусом обнимают четыре пилюли`() {
-        val e = extentsDp(GroupId.META, 0f, metaGadget = true)
-        // 87dp до центра крайней пилюли + 23dp радиус
-        assertEquals(110f, e.left, 1e-6f)
-        assertEquals(110f, e.right, 1e-6f)
-        // по вертикали — как у дефолта
         assertEquals(23f, e.top, 1e-6f)
         assertEquals(23f, e.bottom, 1e-6f)
-        // blockExtents передаёт флаг сквозь себя
-        val be = blockExtents(store(), BlockRef(GroupId.META), 0f, metaGadget = true)
-        assertEquals(e, be)
+        // blockExtents даёт то же
+        assertEquals(e, blockExtents(store(), BlockRef(GroupId.META), 0f))
     }
 
     @Test
-    fun `ряд гаджета — SELECT START сдвинуты вправо зазоры ровные`() {
-        // Включение корпуса сдвигает SELECT/START на шаг (58dp) вправо —
-        // слева освобождается место под SAVE/LOAD; привычные зоны остаются
-        // пилюлями того же размера, просто на новых местах
-        val defSel = SPECS_META.first { it.id == "SELECT" }
-        val gadSel = SPECS_META_GADGET.first { it.id == "SELECT" }
-        val defStart = SPECS_META.first { it.id == "START" }
-        val gadStart = SPECS_META_GADGET.first { it.id == "START" }
-        assertEquals(58f, gadSel.dx - defSel.dx, 1e-6f)
-        assertEquals(58f, gadStart.dx - defStart.dx, 1e-6f)
-        // SAVE/LOAD лежат строго левее SELECT — пересечений квадратов нет
-        val save = SPECS_META_GADGET.first { it.id == "SAVE" }
-        val load = SPECS_META_GADGET.first { it.id == "LOAD" }
-        assertTrue(save.dx + 23f <= load.dx - 23f)
-        assertTrue(load.dx + 23f <= gadSel.dx - 23f)
-        assertTrue(gadSel.dx + 23f <= gadStart.dx - 23f)
+    fun `ряд META — ровные зазоры между пилюлями`() {
+        val sel = SPECS_META.first { it.id == "SELECT" }
+        val start = SPECS_META.first { it.id == "START" }
+        // шаг 58dp при размере 46 — зазор 12dp, как в других рядах
+        assertEquals(58f, start.dx - sel.dx, 1e-6f)
+        assertTrue(sel.dx + 23f <= start.dx - 23f)
     }
 
     // ------------------------------------------------------------------
-    // Пилюли и картинки
+    // Пилюли и каптионы
     // ------------------------------------------------------------------
 
     @Test
-    fun `SAVE и LOAD — пилюли с картинкой и каптионом только в гаджете`() {
-        assertEquals(true, "SAVE" in PILL_IDS && "LOAD" in PILL_IDS)
+    fun `SELECT и START — пилюли с картинкой и каптионом только в гаджете`() {
         val gadget = ControlSkins.byId("gadget")
-        for (id in listOf("SAVE", "LOAD")) {
+        for (id in listOf("SELECT", "START")) {
             assertTrue("gadget: $id imageable", id in ControlSkin.IMAGEABLE_IDS)
             assertTrue("gadget: $id картинка", gadget.buttonImage(id) != null)
-            // каптион = имя кнопки (над пилюлей, как надпись на корпусе)
-            assertEquals(id, gadget.captionFor(id, id))
         }
+        // у спека SELECT подпись «SEL» — каптион даёт полное имя
+        assertEquals("SELECT", gadget.captionFor("SELECT", "SEL"))
+        assertEquals("START", gadget.captionFor("START", "START"))
         // параметрические скины: картинок нет — белый рендер с подписью внутри
         val classic = ControlSkins.byId("classic")
-        for (id in listOf("SAVE", "LOAD")) {
+        for (id in listOf("SELECT", "START")) {
             assertTrue(classic.buttonImage(id) == null)
         }
     }

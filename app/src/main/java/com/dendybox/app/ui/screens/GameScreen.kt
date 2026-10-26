@@ -5,26 +5,11 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -33,15 +18,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.dendybox.app.cheats.CheatRepository
 import com.dendybox.app.emulator.EmulatorEngine
@@ -92,9 +76,6 @@ fun GameScreen(
 
     // Локальный режим «2 игрока» — второй джойстик на том же экране
     val twoLocal by SettingsStore.twoLocal.collectAsState()
-    // Реактивное состояние звука для кнопки Mute (иконка меняется на ходу,
-    // в т.ч. если звук выключили через «Настройки»)
-    val soundOn by SettingsStore.sound.collectAsState()
     // Скин кнопок: у «Гаджета» есть КОРПУС (DeviceSkins.forControlSkin) —
     // живой, корпус появляется/исчезает без перезапуска игры; при первом
     // включении «Гаджета» один раз применяется его пресет раскладки
@@ -146,7 +127,6 @@ fun GameScreen(
         }
 
         if (started && screen == Screen.GAME) {
-            val netLocked = engine.isNetActive()
             // Порт СВОЕЙ стороны в сетевой игре читаем В МОМЕНТ СОБЫТИЯ, а не
             // при композиции: pointerInput-корутины не пересоздаются при
             // рекомпозиции и держат захваченные «на старте» лямбды. Порт,
@@ -154,44 +134,6 @@ fun GameScreen(
             // оказаться 0 вместо 1 (гонка с attachNet), и нажатия
             // «игнорировались». Лямбда ниже всегда читает актуальное состояние.
             val myPort = { if (engine.isNetActive()) engine.netLocalPort() else 0 }
-            // Верхняя панель: слева пауза и Mute, справа квик-сейв/лоад и настройки управления
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp, start = 12.dp, end = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    CircleIcon(Icons.Filled.Pause, "Пауза") { onScreen(Screen.PAUSE) }
-                    CircleIcon(
-                        if (soundOn) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
-                        if (soundOn) "Выключить звук" else "Включить звук"
-                    ) {
-                        val v = !soundOn
-                        SettingsStore.setSound(v)
-                        onSoundChange(v)
-                    }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    CircleIcon(Icons.Filled.Tune, "Настройки управления") { onScreen(Screen.EDIT) }
-                    CircleIcon(Icons.Filled.Save, "Квик-сейв") {
-                        if (netLocked) toast("В сетевой игре сейвы недоступны")
-                        else engine.saveSlot(SaveManager.QUICK) { ok ->
-                            toast(if (ok) "Сохранено" else "Ошибка сохранения")
-                        }
-                    }
-                    CircleIcon(Icons.Filled.FolderOpen, "Квик-лоад") {
-                        if (netLocked) toast("В сетевой игре сейвы недоступны")
-                        else engine.loadSlot(SaveManager.QUICK) { ok ->
-                            toast(if (ok) "Загружено" else "Сейв не найден")
-                        }
-                    }
-                }
-            }
 
             // Джойстик P1 (в сетевой игре — джойстик своей стороны)
             DpadLayer(
@@ -219,22 +161,33 @@ fun GameScreen(
                 }
             }
 
-            // Кнопки корпуса гаджета (SAVE/LOAD в группе META): квик-сейв/лоад
-            // тем же слотом, что и кнопки верхней панели. Сетевая игра — сейвы
-            // недоступны (как в меню). Состояние читаем НА МОМЕНТ НАЖАТИЯ
+            // Системные кнопки экранных групп «Пауза+Mute» и «Редактор+Save+Load»
+            // (маршрутизация та же, что у A/B — GamepadInput): пауза/mute/редактор
+            // открывают свои экраны, SAVE/LOAD — квик-сейв/лоад QUICK-слота тем
+            // же путём, что раньше шла верхняя панель. Сетевая игра — сейвы
+            // недоступны (как в меню). Колбэки/состояние читаем НА МОМЕНТ
+            // НАЖАТИЯ (бинд живёт дольше рекомпозиций — rememberUpdatedState)
+            val currentOnScreen by rememberUpdatedState(onScreen)
+            val currentOnSoundChange by rememberUpdatedState(onSoundChange)
             DisposableEffect(Unit) {
                 GamepadInput.onSystemPress = { id, down ->
-                    if (down) {
-                        if (engine.isNetActive()) {
+                    if (down) when (id) {
+                        "PAUSE" -> currentOnScreen(Screen.PAUSE)
+                        "MUTE" -> {
+                            val v = !SettingsStore.sound.value
+                            SettingsStore.setSound(v)
+                            currentOnSoundChange(v)
+                        }
+                        "EDIT" -> currentOnScreen(Screen.EDIT)
+                        "SAVE" -> if (engine.isNetActive()) {
                             toast("В сетевой игре сейвы недоступны")
-                        } else if (id == "SAVE") {
-                            engine.saveSlot(SaveManager.QUICK) { ok ->
-                                toast(if (ok) "Сохранено" else "Ошибка сохранения")
-                            }
-                        } else {
-                            engine.loadSlot(SaveManager.QUICK) { ok ->
-                                toast(if (ok) "Загружено" else "Сейв не найден")
-                            }
+                        } else engine.saveSlot(SaveManager.QUICK) { ok ->
+                            toast(if (ok) "Сохранено" else "Ошибка сохранения")
+                        }
+                        "LOAD" -> if (engine.isNetActive()) {
+                            toast("В сетевой игре сейвы недоступны")
+                        } else engine.loadSlot(SaveManager.QUICK) { ok ->
+                            toast(if (ok) "Загружено" else "Сейв не найден")
                         }
                     }
                 }
@@ -243,7 +196,7 @@ fun GameScreen(
 
             // Второй джойстик для локальной игры на двоих (по сети он не нужен —
             // второй игрок играет со своего телефона)
-            if (twoLocal && !netLocked) {
+            if (twoLocal && !engine.isNetActive()) {
                 DpadLayer(
                     store = layoutStore,
                     editing = false,
@@ -415,17 +368,5 @@ fun GameScreen(
 
             else -> {}
         }
-    }
-}
-
-@Composable
-private fun CircleIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
-    IconButton(
-        onClick = onClick,
-        modifier = Modifier
-            .background(Color.Black.copy(alpha = 0.35f), CircleShape)
-            .size(44.dp)
-    ) {
-        Icon(icon, desc, tint = Color.White.copy(alpha = 0.85f))
     }
 }

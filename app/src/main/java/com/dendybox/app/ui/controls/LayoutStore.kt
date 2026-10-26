@@ -12,6 +12,9 @@ import androidx.compose.runtime.setValue
  *  [GroupId.AB]   — кластер P1 «как на джойстике Dendy»: турбо B′/A′ сверху,
  *                   основные B/A под ними; пары можно скрывать ([abOff]);
  *  [GroupId.META] — пилюли Select / Start отдельным блоком;
+ *  [GroupId.PAUSE_MUTE] — системные кнопки «Пауза+Mute» (кнопки-действия);
+ *  [GroupId.EDIT_SAVE_LOAD] — системные кнопки «Редактор+Save+Load»
+ *                   (редактор раскладки, квик-сейв/лоад);
  *  [GroupId.DPAD2]/[GroupId.AB2] — второй набор для локальной игры на двоих
  *                   (видим только в режиме «2 игрока», турбо-кнопок нет);
  *  [GroupId.COMBO] — комбо-кнопки: группа №0 из [comboGroups] (наполнение —
@@ -20,6 +23,8 @@ import androidx.compose.runtime.setValue
  * Каждая группа независимо перемещается и масштабируется в редакторе
  * (Screen.EDIT). [Group.x]/[Group.y] — якорь группы (центр) в долях экрана,
  * [Group.scale] — масштаб всех элементов группы (1.0 = базовые dp-размеры).
+ * Системные группы ([GroupId.PAUSE_MUTE]/[GroupId.EDIT_SAVE_LOAD]) заменяют
+ * прежние неподвижные кнопки верхней панели и двигаются как все.
  *
  * КОМБО-ГРУППЫ ([comboGroups]): комбо-кнопки можно делить на несколько
  * блоков — у каждого своё имя, якорь/масштаб и упорядоченный список
@@ -55,7 +60,7 @@ class LayoutStore(private val prefs: SharedPreferences) {
         val keys: List<String> = emptyList()
     )
 
-    enum class GroupId { DPAD, AB, META, DPAD2, AB2, COMBO }
+    enum class GroupId { DPAD, AB, META, PAUSE_MUTE, EDIT_SAVE_LOAD, DPAD2, AB2, COMBO }
 
     data class Group(val x: Float, val y: Float, val scale: Float)
 
@@ -64,6 +69,10 @@ class LayoutStore(private val prefs: SharedPreferences) {
     var ab: Group by mutableStateOf(DEF_AB)
         private set
     var meta: Group by mutableStateOf(DEF_META)
+        private set
+    var pauseMute: Group by mutableStateOf(DEF_SYS1)
+        private set
+    var editSaveLoad: Group by mutableStateOf(DEF_SYS2)
         private set
     var dpad2: Group by mutableStateOf(DEF_DPAD2)
         private set
@@ -109,6 +118,10 @@ class LayoutStore(private val prefs: SharedPreferences) {
                 dpad = read("dpad", DEF_DPAD)
                 ab = read("ab", DEF_AB)
                 meta = read("meta", DEF_META)
+                // системные группы появились позже раскладки v3 —
+                // отсутствие разделов в старом конфиге не ошибка
+                pauseMute = read("sys1", DEF_SYS1)
+                editSaveLoad = read("sys2", DEF_SYS2)
                 dpad2 = read("dpad2", DEF_DPAD2)
                 ab2 = read("ab2", DEF_AB2)
                 // комбо-группы: нет раздела — одна группа из старого «combo»
@@ -123,6 +136,8 @@ class LayoutStore(private val prefs: SharedPreferences) {
         dpad = sanitize(dpad)
         ab = sanitize(ab)
         meta = sanitize(meta)
+        pauseMute = sanitize(pauseMute)
+        editSaveLoad = sanitize(editSaveLoad)
         dpad2 = sanitize(dpad2)
         ab2 = sanitize(ab2)
     }
@@ -131,6 +146,8 @@ class LayoutStore(private val prefs: SharedPreferences) {
         GroupId.DPAD -> dpad
         GroupId.AB -> ab
         GroupId.META -> meta
+        GroupId.PAUSE_MUTE -> pauseMute
+        GroupId.EDIT_SAVE_LOAD -> editSaveLoad
         GroupId.DPAD2 -> dpad2
         GroupId.AB2 -> ab2
         // комбо-группа №0 — преемник старого поля combo
@@ -144,6 +161,8 @@ class LayoutStore(private val prefs: SharedPreferences) {
             GroupId.DPAD -> dpad = v
             GroupId.AB -> ab = v
             GroupId.META -> meta = v
+            GroupId.PAUSE_MUTE -> pauseMute = v
+            GroupId.EDIT_SAVE_LOAD -> editSaveLoad = v
             GroupId.DPAD2 -> dpad2 = v
             GroupId.AB2 -> ab2 = v
             GroupId.COMBO -> updateComboGroupPos(0, v.x, v.y, v.scale)
@@ -176,6 +195,8 @@ class LayoutStore(private val prefs: SharedPreferences) {
             .put("dpad", j(dpad))
             .put("ab", j(ab))
             .put("meta", j(meta))
+            .put("sys1", j(pauseMute))
+            .put("sys2", j(editSaveLoad))
             .put("dpad2", j(dpad2))
             .put("ab2", j(ab2))
             // легаси-поле: позиция комбо-группы №0 (старые версии/скрипты)
@@ -212,7 +233,10 @@ class LayoutStore(private val prefs: SharedPreferences) {
         dpad = sanitize(d)
         ab = sanitize(a)
         meta = sanitize(m)
-        // группы P2 необязательны: старый экспорт (3 группы) тоже импортируется
+        // системные группы и группы P2 необязательны: старый экспорт
+        // (3 группы) тоже импортируется — отсутствие означает заводские
+        read("sys1")?.let { pauseMute = sanitize(it) }
+        read("sys2")?.let { editSaveLoad = sanitize(it) }
         read("dpad2")?.let { dpad2 = sanitize(it) }
         read("ab2")?.let { ab2 = sanitize(it) }
         // комбо-группы: старый экспорт без раздела — одна группа из «combo»
@@ -234,6 +258,8 @@ class LayoutStore(private val prefs: SharedPreferences) {
         dpad = DEF_DPAD
         ab = DEF_AB
         meta = DEF_META
+        pauseMute = DEF_SYS1
+        editSaveLoad = DEF_SYS2
         dpad2 = DEF_DPAD2
         ab2 = DEF_AB2
         comboGroups = listOf(DEF_COMBO_GROUP)
@@ -430,15 +456,15 @@ class LayoutStore(private val prefs: SharedPreferences) {
 
     /**
      * Разовый пресет пакета-скина «Гаджет» (референс — корпус консоли):
-     * крестовина слева, кластер A/B справа, ряд пилюль по центру под
-     * кадром (без корпуса — Select/Start; с корпусом к ним добавляются
-     * SAVE/LOAD — SPECS_META_GADGET), комбо-группа №0 — вверх по центру
-     * (чтобы не сталкивалась с META). Вызывается при первом включении
-     * корпусного скина; масштабы групп сохраняются, позиции зажимаются
-     * санитизацией. Повторные включения и переключения скинов раскладку
-     * НЕ трогают — блоки остаются перемещаемыми, пользовательские
-     * позиции не перекрываются: комбо-группа сдвигается только если
-     * стоит на заводской точке.
+     * крестовина слева, кластер A/B справа, ряд пилюль Select/Start по
+     * центру под кадром, комбо-группа №0 — вверх по центру (чтобы не
+     * сталкивалась с META). Системные группы «Пауза+Mute» /
+     * «Редактор+Save+Load» остаются в верхних углах — там свободно.
+     * Вызывается при первом включении скина «Гаджет»; масштабы групп
+     * сохраняются, позиции зажимаются санитизацией. Повторные включения
+     * и переключения скинов раскладку НЕ трогают — блоки остаются
+     * перемещаемыми, пользовательские позиции не перекрываются:
+     * комбо-группа сдвигается только если стоит на заводской точке.
      */
     fun applyGadgetPresetOnce() {
         if (prefs.getBoolean(PREF_GADGET_PRESET, false)) return
@@ -477,6 +503,13 @@ class LayoutStore(private val prefs: SharedPreferences) {
         val DEF_AB = Group(0.873f, 0.748f, 1.394f)
         val DEF_META = Group(0.854f, 0.265f, 1.0f)
 
+        // Системные группы — верхние углы (на месте прежней верхней панели):
+        // «Пауза+Mute» слева, «Редактор+Save+Load» справа. Якорь — центр ряда;
+        // отступы взяты так, чтобы пилюли оставались в границах экрана
+        // при типичной ландшафтной ширине (крайние случаи подвигаются в редакторе)
+        val DEF_SYS1 = Group(0.10f, 0.08f, 1.0f)
+        val DEF_SYS2 = Group(0.90f, 0.08f, 1.0f)
+
         // Дефолт второго набора (локальный 2P): P2 справа, зеркально P1
         val DEF_DPAD2 = Group(0.72f, 0.70f, 1.0f)
         val DEF_AB2 = Group(0.93f, 0.70f, 1.0f)
@@ -491,6 +524,8 @@ class LayoutStore(private val prefs: SharedPreferences) {
             GroupId.DPAD -> "Крестовина"
             GroupId.AB -> "Кнопки A/B"
             GroupId.META -> "Select/Start"
+            GroupId.PAUSE_MUTE -> "Пауза+Mute"
+            GroupId.EDIT_SAVE_LOAD -> "Редактор+Save+Load"
             GroupId.DPAD2 -> "Крестовина 2 (P2)"
             GroupId.AB2 -> "A/B игрока 2"
             GroupId.COMBO -> "Комбо-кнопки"

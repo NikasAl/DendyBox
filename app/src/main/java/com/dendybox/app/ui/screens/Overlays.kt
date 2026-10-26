@@ -646,11 +646,15 @@ fun EditBar(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.horizontalScroll(rememberScrollState())
             ) {
-                // Обычные блоки (у комбо — свои чипы, по числу групп)
+                // Обычные блоки (у комбо — свои чипы, по числу групп).
+                // Системные группы «Пауза+Mute»/«Редактор+Save+Load» — на месте
+                // прежней верхней панели, двигаются/масштабируются как все
                 val baseIds = if (showP2) LayoutStore.GroupId.entries else listOf(
                     LayoutStore.GroupId.DPAD,
                     LayoutStore.GroupId.AB,
-                    LayoutStore.GroupId.META
+                    LayoutStore.GroupId.META,
+                    LayoutStore.GroupId.PAUSE_MUTE,
+                    LayoutStore.GroupId.EDIT_SAVE_LOAD
                 )
                 baseIds.forEach { gid ->
                     FilterChip(
