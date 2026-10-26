@@ -148,12 +148,23 @@ private fun specsOf(id: LayoutStore.GroupId): List<CtrlSpec> = when (id) {
 
 /**
  * Спеки кластера A/B с учётом скрытых пар ([LayoutStore.abOff]): скрытая
- * пара НЕ рисуется и не занимает места — остаются только кнопки видимой
- * половины (рамка/hit-test следуют за ними).
+ * пара НЕ рисуется и не занимает места. При скрытии ОСНОВНОЙ пары —
+ * КОМПАКТНАЯ ПОДТЯЖКА: турбо-ряд опускается на её место (dy = 0), группа
+ * стягивается без дырки на месте убранных кнопок (рамка/зона/hit-test
+ * следуют за спеками — см. [extentsAb]). Возврат пары возвращает турбо
+ * наверх, к заводу — стандартный двухрядный кластер.
  */
-fun specsAb(hidden: Set<String>): List<CtrlSpec> = SPECS_AB.filter { s ->
-    !((s.id == "A" || s.id == "B") && LayoutStore.AB_MAIN in hidden ||
-        (s.id == "TA" || s.id == "TB") && LayoutStore.AB_TURBO in hidden)
+fun specsAb(hidden: Set<String>): List<CtrlSpec> {
+    val mainVisible = LayoutStore.AB_MAIN !in hidden
+    val turboVisible = LayoutStore.AB_TURBO !in hidden
+    return when {
+        mainVisible && turboVisible -> SPECS_AB
+        mainVisible -> SPECS_AB.filter { it.id == "A" || it.id == "B" }
+        turboVisible ->
+            // подтяжка: турбо-ряд занимает место скрытой пары A/B
+            SPECS_AB.filter { it.id == "TA" || it.id == "TB" }.map { it.copy(dy = 0f) }
+        else -> emptyList()
+    }
 }
 
 /**
@@ -183,9 +194,11 @@ internal fun specsFor(store: LayoutStore, ref: BlockRef): List<CtrlSpec> = when 
 data class Extents(val left: Float, val top: Float, val right: Float, val bottom: Float)
 
 /**
- * Границы кластера A/B при скрытых парах: рамка обнимает видимую половину.
- * Обе пары скрыты — квадратик 24dp (как пустой блок комбо), чтобы блок
- * можно было взять в редакторе.
+ * Границы кластера A/B при скрытых парах: рамка обнимает видимую половину
+ * БЕЗ дырки — при скрытии основной пары турбо-ряд подтягивается на её
+ * место (см. [specsAb]), поэтому и рамка, и зона касаний сжимаются
+ * симметрично вокруг якоря. Обе пары скрыты — квадратик 24dp (как пустой
+ * блок комбо), чтобы блок можно было взять в редакторе.
  */
 fun extentsAb(hidden: Set<String>): Extents {
     val mainVisible = LayoutStore.AB_MAIN !in hidden
@@ -193,7 +206,8 @@ fun extentsAb(hidden: Set<String>): Extents {
     return when {
         mainVisible && turboVisible -> Extents(68f, 104f, 68f, 32f)
         mainVisible -> Extents(68f, 32f, 68f, 32f)
-        turboVisible -> Extents(68f, 104f, 68f, 40f)
+        // турбо-ряд подтянут к якорю (dy = 0) — рамка как у одной пары
+        turboVisible -> Extents(68f, 32f, 68f, 32f)
         else -> Extents(24f, 24f, 24f, 24f)
     }
 }

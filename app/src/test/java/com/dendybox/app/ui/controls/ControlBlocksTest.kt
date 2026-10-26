@@ -41,13 +41,30 @@ class ControlBlocksTest {
     }
 
     @Test
+    fun `скрытие основной пары подтягивает турбо-ряд без дырки`() {
+        val specs = specsAb(setOf(LayoutStore.AB_MAIN))
+        // турбо-ряд опустился на место пары A/B: dy = 0, dx прежние
+        assertEquals(listOf(0f, 0f), specs.map { it.dy })
+        assertEquals(listOf(-36f, 36f), specs.map { it.dx })
+        assertEquals(listOf(64f, 64f), specs.map { it.size })
+        // рамка/зона касаний сжимаются симметрично вокруг якоря —
+        // пустого места на месте убранных кнопок нет:
+        // нижний край рамки = нижний край кнопок (0 + 32)
+        val e = extentsAb(setOf(LayoutStore.AB_MAIN))
+        assertEquals(32f, e.bottom, 1e-6f)
+        assertEquals(32f, e.top, 1e-6f)
+        // и рамка совпадает с рамкой одной основной пары
+        assertEquals(extentsAb(setOf(LayoutStore.AB_TURBO)), e)
+    }
+
+    @Test
     fun `extentsAb обнимает видимую половину`() {
         // обе пары видны: турбо-ряд сверху, основные снизу
         assertEquals(Extents(68f, 104f, 68f, 32f), extentsAb(emptySet()))
         // турбо скрыто: осталась нижняя пара, верх прижат к ней
         assertEquals(Extents(68f, 32f, 68f, 32f), extentsAb(setOf(LayoutStore.AB_TURBO)))
-        // основные скрыты: остался турбо-ряд (центр -72, радиус 32)
-        assertEquals(Extents(68f, 104f, 68f, 40f), extentsAb(setOf(LayoutStore.AB_MAIN)))
+        // основные скрыты: турбо-ряд ПОДТЯНУТ к якорю (dy = 0) — рамка как у одной пары
+        assertEquals(Extents(68f, 32f, 68f, 32f), extentsAb(setOf(LayoutStore.AB_MAIN)))
         // скрыто всё — квадратик для захвата в редакторе
         assertEquals(
             Extents(24f, 24f, 24f, 24f),
