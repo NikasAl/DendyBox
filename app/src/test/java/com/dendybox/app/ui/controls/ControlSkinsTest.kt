@@ -84,11 +84,17 @@ class ControlSkinsTest {
     fun `гаджет — единственный скин с каптионами и переопределением турбо`() {
         val gadget = ControlSkins.byId("gadget")
         assertTrue(gadget.captions)
-        assertEquals("TURBO A", gadget.captionFor("TA", "A′"))
-        assertEquals("TURBO B", gadget.captionFor("TB", "B′"))
-        // без переопределения — стандартная подпись спека
-        assertEquals("A", gadget.captionFor("A", "A"))
+        assertEquals("TURBO", gadget.captionFor("TA", "A′"))
+        assertEquals("TURBO", gadget.captionFor("TB", "B′"))
+        // буквы B/A запечены в фото-кнопки — каптионы над ними ПУСТЫЕ
+        // (пустой каптион не рисуется, текст внутри кнопки тоже)
+        assertEquals("", gadget.captionFor("A", "A"))
+        assertEquals("", gadget.captionFor("B", "B"))
+        // у спека SELECT подпись «SEL» — каптион даёт полное имя
+        assertEquals("SELECT", gadget.captionFor("SELECT", "SEL"))
         assertEquals("START", gadget.captionFor("START", "START"))
+        assertEquals("SAVE", gadget.captionFor("SAVE", "SAVE"))
+        assertEquals("LOAD", gadget.captionFor("LOAD", "LOAD"))
         // остальные скины каптионов не включают — дефолтный вид не затронут
         for (s in ControlSkins.ALL.filter { it.id != "gadget" }) {
             assertFalse("${s.id}: каптионы должны быть выключены", s.captions)
@@ -98,10 +104,15 @@ class ControlSkinsTest {
 
     @Test
     fun `каптион без переопределения возвращается к подписи спека у всех скинов`() {
+        // у гаджета A/SELECT переопределены («» и «SELECT») — только фолбэк
+        // для id вне карты и все остальные скины
         for (s in ControlSkins.ALL) {
+            assertEquals("X", s.captionFor("неизвестный", "X"))
+            assertEquals("START", s.captionFor("START", "START"))
+        }
+        for (s in ControlSkins.ALL.filter { it.id != "gadget" }) {
             assertEquals("A", s.captionFor("A", "A"))
             assertEquals("SEL", s.captionFor("SELECT", "SEL"))
-            assertEquals("X", s.captionFor("неизвестный", "X"))
         }
     }
 

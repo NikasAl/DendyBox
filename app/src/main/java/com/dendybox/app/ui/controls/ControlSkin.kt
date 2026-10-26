@@ -25,8 +25,9 @@ import com.dendybox.app.ui.AccentRed
  * Картинки задаются ТРЕМЯ способами:
  *  - [imgDpad] — крестовина целым блоком (одна картинка на весь блок);
  *  - [imgButtons] — картинка на отдельную кнопку, ключ — id спека
- *    ("A", "B", "TA", "TB", "START", "SELECT"); комбо-кнопки (id "K*")
- *    картинок не имеют — их подписи пользовательские, рендер параметрический;
+ *    ("A", "B", "TA", "TB", "START", "SELECT", "SAVE", "LOAD"); комбо-кнопки
+ *    (id "K*") картинок не имеют — их подписи пользовательские, рендер
+ *    параметрический;
  *  - [imgBlock] — картинка-подложка под ВСЮ группу (панель джойстика),
  *    рисуется под кнопками, кнопки сохраняют свой обычный рендер.
  */
@@ -101,8 +102,12 @@ data class ControlSkin(
         captionLabels[specId] ?: fallback
 
     companion object {
-        /** Id спеков, которым разрешена картинка (см. [buttonImage]). */
-        val IMAGEABLE_IDS = setOf("A", "B", "TA", "TB", "START", "SELECT")
+        /**
+         * Id спеков, которым разрешена картинка (см. [buttonImage]): кнопки
+         * джойстика (A/B/турбо, SELECT/START) и кнопки КОРПУСА гаджета
+         * (SAVE/LOAD — квик-сейв/лоад, см. SPECS_META_GADGET).
+         */
+        val IMAGEABLE_IDS = setOf("A", "B", "TA", "TB", "START", "SELECT", "SAVE", "LOAD")
 
         /**
          * Альфа картинки кнопки — та же механика, что у заливки обычной кнопки:
@@ -329,12 +334,14 @@ object ControlSkins {
     )
 
     // ------------------------------------------------------------------
-    // «Гаджет» — пакет-скин по референсу «карманная консоль»: светлое тело,
-    // тёмная крестовина, красные круглые B/A (и турбо), светло-серые
-    // пилюли SELECT/START. Подписи рисуются КАПТИОНАМИ над кнопками
-    // (на «корпусе»), турбо подписываются «TURBO A»/«TURBO B». Параметри-
-    // ческие цвета остаются только комбо-кнопкам (белые с красной рамкой
-    // и тёмной подписью) и подсветке нажатых стрелок крестовины.
+    // «Гаджет» — пакет-скин по фото-референсам настоящего корпуса
+    // (scripts/photo_src): крестовина и кнопки — ВЫРЕЗКИ ИЗ СНИМКОВ,
+    // буквы на кнопках запечены в картинки. Подписи над кнопками —
+    // каптионы: у основных B/A их НЕТ (буква уже на кнопке — пустой
+    // каптион не рисуется), над турбо — «TURBO» (как на корпусе),
+    // над SELECT/START/SAVE/LOAD — их имена. Параметрические цвета
+    // остаются только комбо-кнопкам (белые с красной рамкой и тёмной
+    // подписью) и подсветке нажатых стрелок крестовины.
     // Скин НЕ влияет на геометрию: зоны нажатий — по спекам, как у всех.
     // ------------------------------------------------------------------
     private fun gadget() = ControlSkin(
@@ -356,17 +363,24 @@ object ControlSkins {
         dpadVisual = DpadVisual.TRIANGLES,
         captions = true,
         captionLabels = mapOf(
-            "TA" to "TURBO A",
-            "TB" to "TURBO B"
+            // буквы B/A запечены в фото-кнопки — каптионы над ними скрыты
+            "A" to "",
+            "B" to "",
+            "TA" to "TURBO",
+            "TB" to "TURBO",
+            // у спека SELECT подпись «SEL» — каптион даёт полное имя
+            "SELECT" to "SELECT"
         ),
         imgDpad = R.drawable.skin_gadget_dpad,
         imgButtons = mapOf(
-            "A" to R.drawable.skin_gadget_btn,
-            "B" to R.drawable.skin_gadget_btn,
-            "TA" to R.drawable.skin_gadget_btn,
-            "TB" to R.drawable.skin_gadget_btn,
+            "A" to R.drawable.skin_gadget_btn_a,
+            "B" to R.drawable.skin_gadget_btn_b,
+            "TA" to R.drawable.skin_gadget_btn_ta,
+            "TB" to R.drawable.skin_gadget_btn_tb,
             "START" to R.drawable.skin_gadget_pill,
-            "SELECT" to R.drawable.skin_gadget_pill
+            "SELECT" to R.drawable.skin_gadget_pill,
+            "SAVE" to R.drawable.skin_gadget_pill,
+            "LOAD" to R.drawable.skin_gadget_pill
         )
     )
 }

@@ -52,13 +52,17 @@ class ControlImagesTest {
     // ------------------------------------------------------------------
 
     @Test
-    fun `три image-скина с картинками на крестовину и все физические кнопки`() {
+    fun `три image-скина с картинками на все кнопки джойстика`() {
+        // Кнопки корпуса SAVE/LOAD (гаджет) у остальных скинов параметрические
+        val joyIds = listOf("A", "B", "TA", "TB", "START", "SELECT")
         for (id in listOf("dendy", "carbon", "arcade")) {
             val s = skin(id)
             assertNotNull("$id: крестовина", s.imgDpad)
-            for (btn in ControlSkin.IMAGEABLE_IDS) {
+            for (btn in joyIds) {
                 assertNotNull("$id: кнопка $btn", s.buttonImage(btn))
             }
+            assertNull("$id: SAVE без корпуса", s.buttonImage("SAVE"))
+            assertNull("$id: LOAD без корпуса", s.buttonImage("LOAD"))
         }
     }
 
@@ -103,12 +107,15 @@ class ControlImagesTest {
     @Test
     fun `гаджет — картинки закреплены за конкретными ресурсами`() {
         val g = skin("gadget")
-        assertEquals(R.drawable.skin_gadget_btn, g.buttonImage("A"))
-        assertEquals(R.drawable.skin_gadget_btn, g.buttonImage("B"))
-        assertEquals(R.drawable.skin_gadget_btn, g.buttonImage("TA"))
-        assertEquals(R.drawable.skin_gadget_btn, g.buttonImage("TB"))
+        assertEquals(R.drawable.skin_gadget_btn_a, g.buttonImage("A"))
+        assertEquals(R.drawable.skin_gadget_btn_b, g.buttonImage("B"))
+        assertEquals(R.drawable.skin_gadget_btn_ta, g.buttonImage("TA"))
+        assertEquals(R.drawable.skin_gadget_btn_tb, g.buttonImage("TB"))
         assertEquals(R.drawable.skin_gadget_pill, g.buttonImage("START"))
         assertEquals(R.drawable.skin_gadget_pill, g.buttonImage("SELECT"))
+        // кнопки корпуса — та же пилюля, что SELECT/START
+        assertEquals(R.drawable.skin_gadget_pill, g.buttonImage("SAVE"))
+        assertEquals(R.drawable.skin_gadget_pill, g.buttonImage("LOAD"))
     }
 
     @Test

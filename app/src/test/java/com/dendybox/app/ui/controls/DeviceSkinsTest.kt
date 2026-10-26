@@ -52,6 +52,13 @@ class DeviceSkinsTest {
     }
 
     @Test
+    fun `динамики у гаджета убраны — отверстия в полях мешали`() {
+        // Отверстия динамиков не читались и спорили с фото-кнопками —
+        // колонки убраны (speakerCount = 0 → drawSpeakers не рисует ничего)
+        assertEquals(0, DeviceSkins.byId("gadget").speakerCount)
+    }
+
+    @Test
     fun `базовые цвета всех скинов корпуса полностью непрозрачны`() {
         for (skin in DeviceSkins.ALL) {
             for ((i, c) in skin.colors().withIndex()) {

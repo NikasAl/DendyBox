@@ -95,6 +95,23 @@ val SPECS_META = listOf(
 )
 
 /**
+ * Кнопки КОРПУСА гаджета: квик-сейв/лоад слева от SELECT/START — один ряд,
+ * как на корпусе референса. Показываются ТОЛЬКО с корпусным скином
+ * ([DeviceSkins] «гаджет»): без корпуса раскладка и вид прежние (2 пилюли).
+ * Нажатия идут через тот же маршрутизатор касаний, но в InputState не
+ * попадают — [GamepadInput.onSystemPress] вызывает квик-сейв/лоад движка.
+ */
+val SPECS_META_GADGET = listOf(
+    CtrlSpec("SAVE", "SAVE", -87f, 0f, 46f),
+    CtrlSpec("LOAD", "LOAD", -29f, 0f, 46f),
+    CtrlSpec("SELECT", "SEL", 29f, 0f, 46f),
+    CtrlSpec("START", "START", 87f, 0f, 46f)
+)
+
+/** Спеки-пилюли: SELECT/START и кнопки корпуса SAVE/LOAD (гаджет). */
+val PILL_IDS = setOf("SELECT", "START", "SAVE", "LOAD")
+
+/**
  * Блок на игровой поверхности: обычная группа ([gid]) или комбо-группа
  * №[comboIdx] ([comboGroups]). Обычные группы (крестовина, A/B и т.д.)
  * не тронуты — BlockRef обобщает только позиционирование/рисовку/ hit-test,
@@ -125,10 +142,15 @@ fun specsAb(hidden: Set<String>): List<CtrlSpec> = SPECS_AB.filter { s ->
         (s.id == "TA" || s.id == "TB") && LayoutStore.AB_TURBO in hidden)
 }
 
-/** Спеки БЛОКА: комбо-группа №i, кластер A/B с учётом скрытых пар, прочие. */
-internal fun specsFor(store: LayoutStore, ref: BlockRef): List<CtrlSpec> = when {
+/**
+ * Спеки БЛОКА: комбо-группа №i, кластер A/B с учётом скрытых пар, прочие.
+ * [metaGadget] — включены кнопки корпуса (SAVE/LOAD в группе META) —
+ * читается на момент события, без корпуса группа та же.
+ */
+internal fun specsFor(store: LayoutStore, ref: BlockRef, metaGadget: Boolean = false): List<CtrlSpec> = when {
     ref.isCombo -> comboSpecs(comboButtonsOf(store, ref.comboIdx))
     ref.gid == LayoutStore.GroupId.AB -> specsAb(store.abOff)
+    ref.gid == LayoutStore.GroupId.META && metaGadget -> SPECS_META_GADGET
     else -> specsOf(ref.gid)
 }
 
@@ -162,11 +184,17 @@ fun extentsAb(hidden: Set<String>): Extents {
     }
 }
 
-fun extentsDp(id: LayoutStore.GroupId, dpadBaseRadiusDp: Float): Extents = when (id) {
+fun extentsDp(
+    id: LayoutStore.GroupId,
+    dpadBaseRadiusDp: Float,
+    metaGadget: Boolean = false
+): Extents = when (id) {
     LayoutStore.GroupId.AB -> extentsAb(emptySet())
     LayoutStore.GroupId.AB2 ->
         Extents(left = 68f, top = 32f, right = 68f, bottom = 32f)
-    LayoutStore.GroupId.META -> Extents(left = 52f, top = 23f, right = 52f, bottom = 23f)
+    LayoutStore.GroupId.META ->
+        if (metaGadget) Extents(110f, 23f, 110f, 23f)
+        else Extents(left = 52f, top = 23f, right = 52f, bottom = 23f)
     LayoutStore.GroupId.COMBO -> comboExtentsDp(ComboStore.effective().size)
     LayoutStore.GroupId.DPAD, LayoutStore.GroupId.DPAD2 -> Extents(
         left = dpadBaseRadiusDp,
@@ -186,11 +214,16 @@ internal fun blockGroup(store: LayoutStore, ref: BlockRef): LayoutStore.Group =
     }
 
 /** Границы контента блока (комбо-группы — по числу ВИДИМЫХ кнопок). */
-internal fun blockExtents(store: LayoutStore, ref: BlockRef, dpadBaseRadiusDp: Float): Extents =
+internal fun blockExtents(
+    store: LayoutStore,
+    ref: BlockRef,
+    dpadBaseRadiusDp: Float,
+    metaGadget: Boolean = false
+): Extents =
     when {
         ref.isCombo -> comboExtentsDp(comboButtonsOf(store, ref.comboIdx).size)
         ref.gid == LayoutStore.GroupId.AB -> extentsAb(store.abOff)
-        else -> extentsDp(ref.gid, dpadBaseRadiusDp)
+        else -> extentsDp(ref.gid, dpadBaseRadiusDp, metaGadget)
     }
 
 // ---------------------------------------------------------------------------
@@ -360,10 +393,11 @@ private fun moveGroupBy(
     zoom: Float,
     parentPx: IntSize,
     density: Density,
-    dpadBaseRadiusDp: Float
+    dpadBaseRadiusDp: Float,
+    metaGadget: Boolean = false
 ) {
     val g = blockGroup(store, ref)
-    val e = blockExtents(store, ref, dpadBaseRadiusDp)
+    val e = blockExtents(store, ref, dpadBaseRadiusDp, metaGadget)
     val l = with(density) { (e.left * g.scale).dp.toPx() / parentPx.width }.coerceAtMost(0.5f)
     val r = with(density) { (e.right * g.scale).dp.toPx() / parentPx.width }.coerceAtMost(0.5f)
     val t = with(density) { (e.top * g.scale).dp.toPx() / parentPx.height }.coerceAtMost(0.5f)
@@ -385,6 +419,9 @@ private fun moveGroupBy(
 @Composable
 fun EditorSurface(store: LayoutStore, selected: BlockRef) {
     val dpadBaseR = SettingsStore.dpadSize.value
+    // Кнопки корпуса расширяют группу META: зажим движения — по её габаритам
+    val deviceSkinId by SettingsStore.deviceSkin.collectAsState()
+    val metaGadget = DeviceSkins.byId(deviceSkinId).enabled
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val parentPx = IntSize(constraints.maxWidth, constraints.maxHeight)
         val density = LocalDensity.current
@@ -396,7 +433,7 @@ fun EditorSurface(store: LayoutStore, selected: BlockRef) {
                         if (pan == Offset.Zero && zoom == 1f) return@detectTransformGestures
                         moveGroupBy(
                             store, selected, pan.x, pan.y, zoom,
-                            parentPx, density, dpadBaseR
+                            parentPx, density, dpadBaseR, metaGadget
                         )
                     }
                 }
@@ -516,6 +553,14 @@ fun ControlsLayer(
         val skin = ControlSkins.byId(SettingsStore.controlSkin.collectAsState().value)
         // Слайдер «Видимость» двигает и картинку-подложку блока (imgBlock)
         val opacity by SettingsStore.controlsOpacity.collectAsState()
+        // Корпусный скин «Гаджет»: в группе META появляются кнопки корпуса
+        // SAVE/LOAD (SPECS_META_GADGET) — и в игре, и в редакторе. Без корпуса
+        // группа та же, что всегда (инвариант дефолтного вида). Hit-test читает
+        // флаг НА МОМЕНТ СОБЫТИЯ (rememberUpdatedState — бинд живёт дольше
+        // рекомпозиций), отрисовка — на момент композиции
+        val deviceSkinId by SettingsStore.deviceSkin.collectAsState()
+        val metaGadget = DeviceSkins.byId(deviceSkinId).enabled
+        val currentMetaGadget by rememberUpdatedState(metaGadget)
 
         // Блоки слоя. Кластер A/B в игре скрывается целиком, если скрыты
         // ОБЕ пары; каждая комбо-группа — отдельный блок: в игре — только
@@ -567,7 +612,7 @@ fun ControlsLayer(
             val g = blockGroup(store, ref) // чтение state — рекомпозиция при изменении
             val cx = g.x * parentPx.width
             val cy = g.y * parentPx.height
-            val e = blockExtents(store, ref, 0f)
+            val e = blockExtents(store, ref, 0f, metaGadget)
             val lPx = with(density) { (e.left * g.scale).dp.toPx() }
             val tPx = with(density) { (e.top * g.scale).dp.toPx() }
             val rPx = with(density) { (e.right * g.scale).dp.toPx() }
@@ -604,7 +649,10 @@ fun ControlsLayer(
                         GamepadInput.bindGroup(
                             ref.bindName,
                             hitTest = { x, y ->
-                                hitTestButton(specsFor(store, ref), blockGroup(store, ref), x, y, px, den)
+                                hitTestButton(
+                                    specsFor(store, ref, currentMetaGadget),
+                                    blockGroup(store, ref), x, y, px, den
+                                )
                             },
                             port = { currentPort },
                             pressed = pressedState
@@ -632,13 +680,13 @@ fun ControlsLayer(
                         selected = selected == ref,
                         onSelect = { onSelect(ref) },
                         onDragPx = { dx, dy ->
-                            moveGroupBy(store, ref, dx, dy, 1f, parentPx, density, 0f)
+                            moveGroupBy(store, ref, dx, dy, 1f, parentPx, density, 0f, metaGadget)
                         }
                     )
                 }
             }
 
-            specsFor(store, ref).forEach { spec ->
+            specsFor(store, ref, metaGadget).forEach { spec ->
                 key(ref.bindName + spec.id) {
                     val sizePx = with(density) { (spec.size * g.scale).dp.toPx() }
                     val x = (cx + spec.dx * g.scale * density.density - sizePx / 2f).toInt()
@@ -653,6 +701,7 @@ fun ControlsLayer(
                         parentPx = parentPx,
                         density = density,
                         editing = editing,
+                        metaGadget = metaGadget,
                         onSelect = { onSelect(ref) },
                         // В редакторе комбо-кнопка тянется КАК КНОПКА: порядок
                         // в группе / перенос между группами (группу двигают
@@ -732,6 +781,8 @@ private fun GameButton(
     parentPx: IntSize,
     density: Density,
     editing: Boolean,
+    // Кнопки корпуса в группе META (SAVE/LOAD) — для зажима при перетаскивании
+    metaGadget: Boolean = false,
     onSelect: () -> Unit,
     // Редактор, комбо-кнопка: тянется САМА КНОПКА (порядок в группе /
     // перенос между группами, см. comboDragTo); палец — в координатах
@@ -754,9 +805,12 @@ private fun GameButton(
     val currentComboDrag by rememberUpdatedState(onComboDragPx)
     val currentX by rememberUpdatedState(xPx)
     val currentY by rememberUpdatedState(yPx)
+    // currentMetaGadget — как currentX/currentY: pointerInput живёт дольше рекомпозиций
+    val currentMetaGadget by rememberUpdatedState(metaGadget)
     val isTurbo = spec.id == "TA" || spec.id == "TB"
     val isCombo = spec.id.startsWith("K") // программируемая комбо-кнопка
-    val isPill = spec.id == "SELECT" || spec.id == "START"
+    // Пилюли: SELECT/START и кнопки корпуса SAVE/LOAD (гаджет)
+    val isPill = spec.id in PILL_IDS
     // Форму задаёт скин (круг для A/B, капсула для SEL/START в классике);
     // в «Пикселе» всё угловатое. Логика нажатий и размеры от формы не зависят
     val shape = when (if (isPill) skin.shapeMeta else skin.shapeMain) {
@@ -841,7 +895,7 @@ private fun GameButton(
                                         change.consume()
                                         moveGroupBy(
                                             store, block, dragAmount.x, dragAmount.y, 1f,
-                                            parentPx, density, 0f
+                                            parentPx, density, 0f, currentMetaGadget
                                         )
                                     }
                                 )
@@ -867,14 +921,17 @@ private fun GameButton(
             )
         }
         // Каптионный режим скина: подпись живёт НАД кнопкой (на «корпусе»),
-        // внутри кнопки текста нет. Касаются только физических кнопок —
-        // у комбо-кнопок подписи пользовательские, всегда внутри.
+        // внутри кнопки текста нет — ДАЖЕ если каптион пуст («A»/«B» гаджета:
+        // буква запечена в фото-кнопку, дублировать её текстом нельзя).
+        // Касаются только физических кнопок — у комбо-кнопок подписи
+        // пользовательские, всегда внутри.
         // Каптион — чистая отрисовка (Text без pointerInput, вне бокса):
         // зона нажатия остаётся ровно кнопкой, hit-test не меняется
-        val showCaption = skin.captions && spec.id in ControlSkin.IMAGEABLE_IDS
-        if (showCaption) {
+        val captionMode = skin.captions && spec.id in ControlSkin.IMAGEABLE_IDS
+        val captionText = if (captionMode) skin.captionFor(spec.id, spec.label) else ""
+        if (captionText.isNotEmpty()) {
             Text(
-                text = skin.captionFor(spec.id, spec.label),
+                text = captionText,
                 color = skin.label.copy(alpha = alphas.label),
                 fontWeight = FontWeight.Bold,
                 fontFamily = if (skin.monospace) FontFamily.Monospace else null,
@@ -886,7 +943,7 @@ private fun GameButton(
                     .offset(y = (-15).dp)
             )
         }
-        if (!showCaption) {
+        if (!captionMode) {
             Text(
                 text = spec.label,
                 color = skin.label.copy(alpha = alphas.label),

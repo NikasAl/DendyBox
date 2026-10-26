@@ -217,6 +217,28 @@ fun GameScreen(
                 }
             }
 
+            // Кнопки корпуса гаджета (SAVE/LOAD в группе META): квик-сейв/лоад
+            // тем же слотом, что и кнопки верхней панели. Сетевая игра — сейвы
+            // недоступны (как в меню). Состояние читаем НА МОМЕНТ НАЖАТИЯ
+            DisposableEffect(Unit) {
+                GamepadInput.onSystemPress = { id, down ->
+                    if (down) {
+                        if (engine.isNetActive()) {
+                            toast("В сетевой игре сейвы недоступны")
+                        } else if (id == "SAVE") {
+                            engine.saveSlot(SaveManager.QUICK) { ok ->
+                                toast(if (ok) "Сохранено" else "Ошибка сохранения")
+                            }
+                        } else {
+                            engine.loadSlot(SaveManager.QUICK) { ok ->
+                                toast(if (ok) "Загружено" else "Сейв не найден")
+                            }
+                        }
+                    }
+                }
+                onDispose { GamepadInput.onSystemPress = null }
+            }
+
             // Второй джойстик для локальной игры на двоих (по сети он не нужен —
             // второй игрок играет со своего телефона)
             if (twoLocal && !netLocked) {
