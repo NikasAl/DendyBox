@@ -9,7 +9,7 @@ import org.junit.Test
 
 /**
  * Скины «корпуса» ([DeviceSkin]/[DeviceSkins]) — конфиг декоративного
- * слоя-гаджета вокруг кадра игры. Ключевые инварианты:
+ * фона-гаджета во весь экран. Ключевые инварианты:
  *  - дефолт — «Нет»: слой не рисуется, классический вид не затронут;
  *    «Нет» же — запасной скин для неизвестного id;
  *  - слой ЧИСТО визуальный: конфиг не содержит геометрии контролов и
@@ -17,7 +17,9 @@ import org.junit.Test
  *    скина (как у ControlSkin);
  *  - «Гаджет» включён и отличается от «Нет»; все цвета непрозрачны —
  *    прозрачность игрового «окна» задаётся геометрией пути (even-odd),
- *    а не альфой краски.
+ *    а не альфой краски;
+ *  - резерв кадра при корпусе — ровно 1px: игра остаётся максимально
+ *    большой, кадр не касается кромок экрана.
  */
 class DeviceSkinsTest {
 
@@ -75,21 +77,15 @@ class DeviceSkinsTest {
     }
 
     @Test
-    fun `динамики у гаджета убраны — отверстия в полях мешали`() {
-        // Отверстия динамиков не читались и спорили с фото-кнопками —
-        // колонки убраны (speakerCount = 0 → drawSpeakers не рисует ничего)
-        assertEquals(0, DeviceSkins.byId("gadget").speakerCount)
-    }
-
-    @Test
-    fun `резерв кадра под корпус равен отступу зазору и безелю`() {
-        // «Гаджет»: 6 + 3 + 8 = 17dp — столько движок оставляет вокруг кадра
-        // (EmulatorEngine.shellReservePx), чтобы корпус вмещал фрейм целиком
-        val gadget = DeviceSkins.byId("gadget")
-        assertEquals(17f, DeviceSkins.reserveDp(gadget), 1e-6f)
+    fun `резерв кадра при активном корпусе — ровно 1px`() {
+        // движок оставляет вокруг кадра 1px (EmulatorEngine.shellReservePx):
+        // кадр не касается кромок экрана, кольцо безеля всегда читается,
+        // картинка остаётся максимально большой
+        assertEquals(1f, DeviceSkins.FRAME_PAD_PX, 1e-6f)
+        assertEquals(1f, DeviceSkins.framePadPx(DeviceSkins.byId("gadget")), 1e-6f)
         // «нет корпуса» — резерв не нужен, вид по умолчанию не меняется
-        assertEquals(0f, DeviceSkins.reserveDp(DeviceSkins.DEFAULT), 1e-6f)
-        assertEquals(0f, DeviceSkins.reserveDp(DeviceSkins.byId("неизвестный")), 1e-6f)
+        assertEquals(0f, DeviceSkins.framePadPx(DeviceSkins.DEFAULT), 1e-6f)
+        assertEquals(0f, DeviceSkins.framePadPx(DeviceSkins.byId("неизвестный")), 1e-6f)
     }
 
     @Test
@@ -102,20 +98,7 @@ class DeviceSkinsTest {
     }
 
     @Test
-    fun `геометрия корпуса положительна и в разумных пределах`() {
-        for (skin in DeviceSkins.ALL) {
-            assertTrue("${skin.id}: margin", skin.bodyMarginDp > 0f)
-            assertTrue("${skin.id}: corner", skin.bodyCornerDp > 0f)
-            assertTrue("${skin.id}: gap", skin.bezelGapDp >= 0f)
-            assertTrue("${skin.id}: bezel", skin.bezelWidthDp > 0f)
-            assertTrue("${skin.id}: динамики", skin.speakerCount >= 0)
-            assertTrue("${skin.id}: радиус", skin.speakerRadiusDp > 0f)
-            assertTrue("${skin.id}: шаг", skin.speakerStepDp > 0f)
-        }
-    }
-
-    @Test
-    fun `у нет корпуса геометрия не влияет — слой не рисуется`() {
+    fun `у нет корпуса слой не рисуется — вид по умолчанию не меняется`() {
         // инвариант дефолта: даже «случайные» значения none не включают слой
         assertFalse(DeviceSkins.DEFAULT.enabled)
         assertFalse(DeviceSkins.byId("none").enabled)
@@ -137,15 +120,10 @@ class DeviceSkinsTest {
         val gadget = DeviceSkins.byId("gadget")
         val faded = gadget.tinted(0.4f)
         assertEquals(0.4f, faded.bodyColor.alpha, 1f / 255f + 1e-6f)
-        assertEquals(0.4f, faded.bodyStroke.alpha, 1f / 255f + 1e-6f)
         assertEquals(0.4f, faded.bezelColor.alpha, 1f / 255f + 1e-6f)
-        assertEquals(0.4f, faded.speakerColor.alpha, 1f / 255f + 1e-6f)
         // RGB сохранён (тело остаётся тем же цветом, просто прозрачнее)
         assertEquals(gadget.bodyColor.copy(alpha = 1f), faded.bodyColor.copy(alpha = 1f))
         assertEquals(gadget.bezelColor.copy(alpha = 1f), faded.bezelColor.copy(alpha = 1f))
-        // геометрия не тронута — прозрачность не меняет размеры
-        assertEquals(gadget.bodyMarginDp, faded.bodyMarginDp, 1e-6f)
-        assertEquals(gadget.bezelWidthDp, faded.bezelWidthDp, 1e-6f)
     }
 
     @Test

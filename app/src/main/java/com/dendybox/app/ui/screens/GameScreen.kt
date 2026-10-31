@@ -27,7 +27,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.dendybox.app.cheats.CheatRepository
 import com.dendybox.app.emulator.EmulatorEngine
@@ -89,17 +88,17 @@ fun GameScreen(
     LaunchedEffect(gadgetSkinActive) {
         if (gadgetSkinActive) layoutStore.applyGadgetPresetOnce()
     }
-    // Резерв кадра под корпус: с активным скином «Гаджет» движок оставляет
-    // вокруг картинки запас (отступ тела + зазор + безель, px из Density) —
-    // корпус целиком вмещает фрейм по вертикали даже при почти нулевых
-    // полях letterbox (HD+-экраны с высотой, кратной 240: раньше фрейм
-    // выступал за верхнюю/нижнюю кромку корпуса). Классика — без резерва,
+    // Отступ кадра под корпус: с активным скином «Гаджет» движок оставляет
+    // вокруг картинки 1px ([DeviceSkins.FRAME_PAD_PX]) — кадр не касается
+    // краёв экрана и волосяное кольцо безеля всегда читается, а картинка
+    // остаётся максимально большой (целый масштаб сохраняется на всех
+    // экранах, где поля letterbox >= 2px; на кратных-240 высотах кадр
+    // сжимается всего на ~2px вместо прежних 34px). Классика — без резерва,
     // вид по умолчанию не меняется. frameRect без аргумента читает тот же
     // резерв — окно корпуса всегда совпадает с нарисованной картинкой.
     val shellSkin = DeviceSkins.forControlSkin(controlSkinId)
-    val density = LocalDensity.current
     SideEffect {
-        engine.setShellReserve(with(density) { DeviceSkins.reserveDp(shellSkin).dp.toPx() })
+        engine.setShellReserve(DeviceSkins.framePadPx(shellSkin))
     }
     LaunchedEffect(twoLocal) {
         // при первом включении — один раз расставить P1 слева / P2 справа
@@ -128,14 +127,16 @@ fun GameScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Слой корпуса (часть скина «Гаджет»): рисуется ВЫШЕ игровой
-        // поверхности (закрывает только чёрные поля letterbox — «окно»
-        // вырезается ровно по кадру) и НИЖЕ меню/крестовины/кнопок.
-        // Без pointerInput — касания проходят сквозь слой: роутинг, зоны
-        // нажатий и перемещаемость групп не меняются. У прочих скинов
-        // корпуса нет — слой не рисует вовсе. Слайдер «Видимость» двигает
-        // и корпус: при базовом значении вид как спроектирован, ниже —
-        // корпус растворяется вместе с кнопками (ControlAlphas.shellAlpha)
+        // Слой корпуса (часть скина «Гаджет»): фон-заливка ВСЕГО экрана.
+        // В z-порядке слой НИЖЕ меню/крестовины/кнопок; игровую поверхность
+        // он не перекрывает — «окно» вырезано ровно по кадру, и ни один
+        // пиксель игры не закрывается (фактически корпус «под дисплеем»,
+        // видим только на полях letterbox). Без pointerInput — касания
+        // проходят сквозь слой: роутинг, зоны нажатий и перемещаемость
+        // групп не меняются. У прочих скинов корпуса нет — слой не рисует
+        // вовсе. Слайдер «Видимость» двигает и корпус: при базовом значении
+        // вид как спроектирован, ниже — корпус растворяется вместе с
+        // кнопками (ControlAlphas.shellAlpha)
         if (started && screen in setOf(Screen.GAME, Screen.EDIT, Screen.PAUSE)) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val frame = engine.frameRect(constraints.maxWidth, constraints.maxHeight)
