@@ -5,6 +5,7 @@ import com.dendybox.app.ui.AccentRed
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -12,28 +13,41 @@ import org.junit.Test
 /**
  * Скины кнопок управления ([ControlSkin]/[ControlSkins]) — чистый визуальный
  * конфиг. Ключевые инварианты:
+ *  - набор СОКРАЩЁН до двух: «Классический» (дефолт, параметрика) и
+ *    «Гаджет» (пакет-скин по фото-референсам, единственный с корпусом);
  *  - «Классический» повторяет прежний захардкоженный вид: белые круги/пилюли,
  *    красная подсветка турбо и активных стрелок, стрелочная крестовина;
- *  - классика — дефолт и запасной скин для неизвестного id;
+ *  - классика — дефолт и запасной скин для неизвестного id (в том числе для
+ *    id удалённых скинов — неон/пиксель/тёмный/денди/карбон/аркада);
  *  - скины визуально различаются (иначе выбор бессмыслен);
  *  - все базовые цвета полностью непрозрачны: прозрачность принадлежит
  *    [ControlAlphas] (слайдер «Видимость»), скин только красит.
  *
- * Image-скины (картинки из ресурсов) — в ControlImagesTest.
+ * Image-механика (картинки из ресурсов) — в ControlImagesTest.
  */
 class ControlSkinsTest {
 
     private val classic = ControlSkins.byId(ControlSkins.DEFAULT_ID)
 
     // ------------------------------------------------------------------
-    // Состав набора
+    // Состав набора: ровно два скина
     // ------------------------------------------------------------------
 
     @Test
-    fun `в наборе восемь скинов с уникальными идентификаторами`() {
-        assertEquals(8, ControlSkins.ALL.size)
-        assertEquals(8, ControlSkins.ALL.map { it.id }.toSet().size)
-        assertEquals(8, ControlSkins.ALL.map { it.title }.toSet().size)
+    fun `в наборе ровно два скина классический и гаджет`() {
+        assertEquals(2, ControlSkins.ALL.size)
+        assertEquals(listOf("classic", "gadget"), ControlSkins.ALL.map { it.id })
+        assertEquals(
+            listOf("Классический", "Гаджет"),
+            ControlSkins.ALL.map { it.title }
+        )
+        // уникальность id и названий
+        assertEquals(2, ControlSkins.ALL.map { it.id }.toSet().size)
+        assertEquals(2, ControlSkins.ALL.map { it.title }.toSet().size)
+        // удалённые скины больше не резолвятся
+        for (removed in listOf("neon", "pixel", "dark", "dendy", "carbon", "arcade")) {
+            assertSame("$removed: должен резолвиться в классику", classic, ControlSkins.byId(removed))
+        }
     }
 
     @Test
@@ -130,15 +144,15 @@ class ControlSkinsTest {
     }
 
     @Test
-    fun `у пиксельного скина квадраты моношрифт и крест а у остальных стрелки`() {
-        val pixel = ControlSkins.byId("pixel")
-        assertEquals(SkinShape.SQUARE, pixel.shapeMain)
-        assertEquals(SkinShape.SQUARE, pixel.shapeMeta)
-        assertTrue(pixel.monospace)
-        assertEquals(DpadVisual.CROSS, pixel.dpadVisual)
-        for (id in listOf("classic", "neon", "dark")) {
-            assertEquals(DpadVisual.TRIANGLES, ControlSkins.byId(id).dpadVisual)
-            assertFalse(ControlSkins.byId(id).monospace)
+    fun `гаджет отличается от классики каптионами рамкой и подписями`() {
+        val gadget = ControlSkins.byId("gadget")
+        assertTrue(gadget.captions && !classic.captions)
+        assertNotEquals(classic.border, gadget.border)
+        assertNotEquals(classic.label, gadget.label)
+        // крестовина у обоих стрелочная, моношрифт нигде не включён
+        for (s in ControlSkins.ALL) {
+            assertEquals(DpadVisual.TRIANGLES, s.dpadVisual)
+            assertFalse("${s.id}: моношрифт", s.monospace)
         }
     }
 
@@ -159,5 +173,18 @@ class ControlSkinsTest {
     fun `набор цветов скина покрывает все элементы отрисовки`() {
         // fill, border, turbo, combo, label + 5 цветов крестовины
         for (skin in ControlSkins.ALL) assertEquals(10, skin.colors().size)
+    }
+
+    // ------------------------------------------------------------------
+    // Комбо-кнопки и неизвестные спеки: картинок нет ни у одного скина
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `комбо и неизвестные кнопки картинок не получают`() {
+        for (s in ControlSkins.ALL) {
+            assertNull("${s.id}: комбо", s.buttonImage("K1"))
+            assertNull("${s.id}: пустой id", s.buttonImage(""))
+            assertNull("${s.id}: неизвестный id", s.buttonImage("XX"))
+        }
     }
 }

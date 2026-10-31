@@ -67,13 +67,13 @@ class ButtonLookTest {
 
     @Test
     fun `смена скина меняет вид комбо-кнопки`() {
-        val neon = look("neon", "Kx")
-        val pixel = look("pixel", "Kx")
-        assertTrue(neon.shape != pixel.shape || neon.fill != pixel.fill)
-        assertTrue(neon.borderColor != pixel.borderColor)
-        // у пикселя угловатая форма
-        assertEquals(SkinShape.SQUARE, pixel.shape)
-        assertEquals(SkinShape.CIRCLE, neon.shape)
+        val classic = look("classic", "Kx")
+        val gadget = look("gadget", "Kx")
+        // у обоих скинов комбо — белые круги с красной рамкой, различие —
+        // в цвете подписи: тёмная на светлом корпусе гаджета
+        assertEquals(classic.shape, gadget.shape)
+        assertEquals(classic.borderColor, gadget.borderColor)
+        assertTrue(classic.labelColor != gadget.labelColor)
     }
 
     // ------------------------------------------------------------------
@@ -155,8 +155,6 @@ class ButtonLookTest {
         for (id in listOf("SELECT", "START", "PAUSE", "MUTE", "EDIT", "SAVE", "LOAD")) {
             assertEquals("$id: форма пилюли", SkinShape.PILL, look("classic", id).shape)
         }
-        // в пиксельном скине пилюли квадратные — скин задаёт форму
-        assertEquals(SkinShape.SQUARE, look("pixel", "SELECT").shape)
     }
 
     // ------------------------------------------------------------------

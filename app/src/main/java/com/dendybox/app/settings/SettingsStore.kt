@@ -16,11 +16,11 @@ object SettingsStore {
     val haptics = MutableStateFlow(true)      // вибрация при уроне (если игра задаёт байт урона)
     val dpadSize = MutableStateFlow(58f)      // радиус крестовины, dp
     val controlsOpacity = MutableStateFlow(0.55f) // общая видимость контролов: заливки, рамки, крестовина, подписи
-    // Скин кнопок: идентификатор из ControlSkins (classic/neon/pixel/dark/…).
-    // Строка хранится здесь, ресолв в ControlSkin — в ui.controls (byId),
-    // чтобы настройки не зависели от UI-слоя. КОРПУС — часть скина:
-    // у «Гаджета» он есть, у остальных нет (ресолв — DeviceSkins
-    // .forControlSkin в ui.controls); отдельной настройки корпуса больше нет.
+    // Скин кнопок: идентификатор из ControlSkins (classic | gadget — набор
+    // сокращён до двух). Строка хранится здесь, ресолв в ControlSkin —
+    // в ui.controls (byId), чтобы настройки не зависели от UI-слоя.
+    // КОРПУС — часть скина: у «Гаджета» он есть, у остальных нет (ресолв —
+    // DeviceSkins.forControlSkin в ui.controls); отдельной настройки корпуса нет.
     val controlSkin = MutableStateFlow("classic")
     val twoLocal = MutableStateFlow(false)    // локальный режим «2 игрока» на одном экране
 
@@ -46,6 +46,15 @@ object SettingsStore {
                 controlSkin.value = "gadget"
             }
             edit().putString("controlSkin", controlSkin.value).remove("deviceSkin").apply()
+        }
+        // Набор скинов сокращён до «Классический»/«Гаджет»: сохранённый id
+        // удалённого скина (неон/пиксель/тёмный/денди/карбон/аркада) заменяется
+        // дефолтом — классикой. byId и так резолвит неизвестный id в классику
+        // при живой отрисовке; здесь же значение вычищается из prefs,
+        // чтобы в настройках не оставался мусор от прежних версий.
+        if (controlSkin.value != "classic" && controlSkin.value != "gadget") {
+            controlSkin.value = "classic"
+            edit().putString("controlSkin", "classic").apply()
         }
     }
 

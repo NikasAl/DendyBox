@@ -8,10 +8,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Image-скины — картинки из ресурсов приложения (res/drawable-nodpi) вместо
- * параметрической формы/цветов. Ключевые инварианты:
- *  - «Классический» (дефолт) и остальные параметрические скины картинок НЕ
- *    имеют — их вид не изменился;
+ * Image-механика скинов — картинки из ресурсов приложения
+ * (res/drawable-nodpi) вместо параметрической формы/цветов. Ключевые
+ * инварианты:
+ *  - «Классический» (дефолт) картинок НЕ имеет — его вид не изменился;
+ *  - «Гаджет» — единственный скин с картинками: крестовина и все физические
+ *    кнопки — вырезки из фото-референсов (scripts/photo_src);
  *  - картинка разрешена ТОЛЬКО физическим кнопкам ([ControlSkin.IMAGEABLE_IDS]);
  *    у комбо-кнопок ("K*") подписи пользовательские — всегда параметрический
  *    рендер;
@@ -24,7 +26,7 @@ class ControlImagesTest {
     private fun skin(id: String) = ControlSkins.byId(id)
 
     // ------------------------------------------------------------------
-    // Дефолт и параметрические скины без картинок
+    // Дефолт без картинок
     // ------------------------------------------------------------------
 
     @Test
@@ -37,62 +39,21 @@ class ControlImagesTest {
         assertNull(c.buttonImage("K1"))
     }
 
+    // ------------------------------------------------------------------
+    // «Гаджет» — единственный скин с картинками
+    // ------------------------------------------------------------------
+
     @Test
-    fun `параметрические скины тоже без картинок`() {
-        for (id in listOf("classic", "neon", "pixel", "dark")) {
-            val s = skin(id)
-            assertNull("$id: крестовина", s.imgDpad)
-            assertTrue("$id: кнопки", s.imgButtons.isEmpty())
-            assertNull("$id: подложка", s.imgBlock)
+    fun `картинки есть только у гаджета`() {
+        for (s in ControlSkins.ALL.filter { it.id != "gadget" }) {
+            assertNull("${s.id}: крестовина", s.imgDpad)
+            assertTrue("${s.id}: кнопки", s.imgButtons.isEmpty())
+            assertNull("${s.id}: подложка", s.imgBlock)
         }
+        val g = skin("gadget")
+        assertNotNull(g.imgDpad)
+        assertTrue(g.imgButtons.isNotEmpty())
     }
-
-    // ------------------------------------------------------------------
-    // Состав image-скинов
-    // ------------------------------------------------------------------
-
-    @Test
-    fun `три image-скина с картинками на все кнопки джойстика`() {
-        // Кнопки корпуса SAVE/LOAD (гаджет) у остальных скинов параметрические
-        val joyIds = listOf("A", "B", "TA", "TB", "START", "SELECT")
-        for (id in listOf("dendy", "carbon", "arcade")) {
-            val s = skin(id)
-            assertNotNull("$id: крестовина", s.imgDpad)
-            for (btn in joyIds) {
-                assertNotNull("$id: кнопка $btn", s.buttonImage(btn))
-            }
-            assertNull("$id: SAVE без корпуса", s.buttonImage("SAVE"))
-            assertNull("$id: LOAD без корпуса", s.buttonImage("LOAD"))
-        }
-    }
-
-    @Test
-    fun `картинки закреплены за конкретными ресурсами`() {
-        assertEquals(R.drawable.skin_dendy_dpad, skin("dendy").imgDpad)
-        assertEquals(R.drawable.skin_dendy_btn, skin("dendy").buttonImage("A"))
-        assertEquals(R.drawable.skin_dendy_btn, skin("dendy").buttonImage("TB"))
-        assertEquals(R.drawable.skin_dendy_pill, skin("dendy").buttonImage("SELECT"))
-        assertEquals(R.drawable.skin_carbon_dpad, skin("carbon").imgDpad)
-        assertEquals(R.drawable.skin_carbon_btn, skin("carbon").buttonImage("B"))
-        assertEquals(R.drawable.skin_arcade_dpad, skin("arcade").imgDpad)
-        assertEquals(R.drawable.skin_arcade_btn_red, skin("arcade").buttonImage("A"))
-        assertEquals(R.drawable.skin_arcade_btn_red, skin("arcade").buttonImage("TA"))
-        assertEquals(R.drawable.skin_arcade_btn_yellow, skin("arcade").buttonImage("B"))
-        assertEquals(R.drawable.skin_arcade_pill, skin("arcade").buttonImage("START"))
-    }
-
-    @Test
-    fun `комбо и неизвестные кнопки картинок не получают`() {
-        for (s in ControlSkins.ALL) {
-            assertNull("${s.id}: комбо", s.buttonImage("K1"))
-            assertNull("${s.id}: пустой id", s.buttonImage(""))
-            assertNull("${s.id}: неизвестный id", s.buttonImage("XX"))
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // «Гаджет» — пакет-скин: картинки закреплены за ресурсами
-    // ------------------------------------------------------------------
 
     @Test
     fun `гаджет — картинки крестовины и всех физических кнопок`() {
@@ -119,11 +80,10 @@ class ControlImagesTest {
     }
 
     @Test
-    fun `подложка целым блоком только у карбона`() {
-        assertNotNull(skin("carbon").imgBlock)
-        for (s in ControlSkins.ALL.filter { it.id != "carbon" }) {
-            assertNull("${s.id}: подложка", s.imgBlock)
-        }
+    fun `подложка imgBlock в текущем наборе не используется`() {
+        // механизм остался (рендер подложки в ControlsOverlay), но ни один
+        // скин набора подложку не задаёт — тело рисует DeviceShellLayer
+        for (s in ControlSkins.ALL) assertNull("${s.id}: подложка", s.imgBlock)
     }
 
     // ------------------------------------------------------------------
@@ -148,7 +108,7 @@ class ControlImagesTest {
     }
 
     @Test
-    fun `альфа картинки в пределах от 0 до 1 на всём ходе и за краями`() {
+    fun `альфа картинки в пределах от нуля до единицы на всём ходе и за краями`() {
         for (op in listOf(-1f, 0f, 0.2f, 0.5f, 0.9f, 1f, 2f)) {
             assertTrue(
                 "op=$op not pressed",

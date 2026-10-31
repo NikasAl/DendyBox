@@ -22,14 +22,21 @@ import com.dendybox.app.ui.AccentRed
  *  - смена скина живая: id хранится в SettingsStore.controlSkin (StateFlow),
  *    кнопки и крестовина перекрашиваются без перезапуска игры.
  *
- * Картинки задаются ТРЕМЯ способами:
+ * НАБОР СКИНОВ СОКРАЩЁН ДО ДВУХ (по итогам ревью): «Классический» (дефолт,
+ * параметрика) и «Гаджет» (пакет-скин по фото-референсам, единственный с
+ * корпусом — DeviceSkins.forControlSkin). Прежние Неон/Пиксель/Тёмный/
+ * Денди/Карбон/Аркада удалены вместе с их ассетами; сохранённый в настройках
+ * старый id резолвится в классику (byId) — отдельной миграции не нужно.
+ *
+ * Картинки задаются ТРЕМЯ способами (механизм общескиновый):
  *  - [imgDpad] — крестовина целым блоком (одна картинка на весь блок);
  *  - [imgButtons] — картинка на отдельную кнопку, ключ — id спека
  *    ("A", "B", "TA", "TB", "START", "SELECT", "SAVE", "LOAD"); комбо-кнопки
  *    (id "K*") картинок не имеют — их подписи пользовательские, рендер
  *    параметрический;
  *  - [imgBlock] — картинка-подложка под ВСЮ группу (панель джойстика),
- *    рисуется под кнопками, кнопки сохраняют свой обычный рендер.
+ *    рисуется под кнопками, кнопки сохраняют свой обычный рендер
+ *    (в текущем наборе не используется ни одним скином — механизм оставлен).
  */
 enum class SkinShape { CIRCLE, PILL, SQUARE }
 
@@ -132,9 +139,11 @@ object ControlSkins {
     /** Идентификатор скина «Гаджет» — единственного с корпусом (см. DeviceSkins). */
     const val GADGET_ID = "gadget"
 
-    /** Набор скинов; ПЕРВЫЙ — классика: по нему resolve'ится неизвестный id. */
-    val ALL: List<ControlSkin> =
-        listOf(classic(), neon(), pixel(), dark(), dendy(), carbon(), arcade(), gadget())
+    /**
+     * Набор скинов — ровно два: «Классический» (первый — по нему resolve'ится
+     * неизвестный id) и «Гаджет». Остальные скины удалены по итогам ревью.
+     */
+    val ALL: List<ControlSkin> = listOf(classic(), gadget())
 
     /** Классический скин (= дефолт). */
     val DEFAULT: ControlSkin get() = byId(DEFAULT_ID)
@@ -164,179 +173,6 @@ object ControlSkins {
         dpadArrowActive = AccentRed,
         dpadDot = Color.White,
         dpadVisual = DpadVisual.TRIANGLES
-    )
-
-    // ------------------------------------------------------------------
-    // «Неон» — контурные кнопки с цветной обводкой; заливка тёмная,
-    // на фоне игры выглядит почти прозрачной.
-    // ------------------------------------------------------------------
-    private fun neon() = ControlSkin(
-        id = "neon",
-        title = "Неон",
-        shapeMain = SkinShape.CIRCLE,
-        shapeMeta = SkinShape.PILL,
-        fill = Color(0xFF0B1026),
-        border = Color(0xFF00E5FF),
-        turboBorder = Color(0xFFFF2E88),
-        comboBorder = Color(0xFFB388FF),
-        label = Color(0xFF9BEBFF),
-        monospace = false,
-        dpadFill = Color(0xFF0B1026),
-        dpadStroke = Color(0xFF00E5FF),
-        dpadArrow = Color(0xFF00E5FF),
-        dpadArrowActive = Color(0xFFFF2E88),
-        dpadDot = Color(0xFF00E5FF),
-        dpadVisual = DpadVisual.TRIANGLES
-    )
-
-    // ------------------------------------------------------------------
-    // «Пиксель» — угловатые квадратные кнопки в цвете пластика Dendy,
-    // тёмные подписи моноширинным шрифтом, крестовина — цельный крест.
-    // ------------------------------------------------------------------
-    private fun pixel() = ControlSkin(
-        id = "pixel",
-        title = "Пиксель",
-        shapeMain = SkinShape.SQUARE,
-        shapeMeta = SkinShape.SQUARE,
-        fill = Color(0xFFE8E4D4),
-        border = Color(0xFF2E2E2E),
-        turboBorder = Color(0xFFC62828),
-        comboBorder = Color(0xFFC62828),
-        label = Color(0xFF2E2E2E),
-        monospace = true,
-        dpadFill = Color(0xFFE8E4D4),
-        dpadStroke = Color(0xFF2E2E2E),
-        dpadArrow = Color(0xFF2E2E2E),
-        dpadArrowActive = Color(0xFFC62828),
-        dpadDot = Color(0xFF2E2E2E),
-        dpadVisual = DpadVisual.CROSS
-    )
-
-    // ------------------------------------------------------------------
-    // «Тёмный» — тёмная полупрозрачная заливка (на фоне игры) со светлой
-    // рамкой и светлыми подписями.
-    // ------------------------------------------------------------------
-    private fun dark() = ControlSkin(
-        id = "dark",
-        title = "Тёмный",
-        shapeMain = SkinShape.CIRCLE,
-        shapeMeta = SkinShape.PILL,
-        fill = Color(0xFF15151C),
-        border = Color(0xFFB8B8C4),
-        turboBorder = Color(0xFFFF8A80),
-        comboBorder = Color(0xFFFF8A80),
-        label = Color(0xFFF2F2F7),
-        monospace = false,
-        dpadFill = Color(0xFF15151C),
-        dpadStroke = Color(0xFFB8B8C4),
-        dpadArrow = Color(0xFFB8B8C4),
-        dpadArrowActive = Color(0xFFFF8A80),
-        dpadDot = Color(0xFFB8B8C4),
-        dpadVisual = DpadVisual.TRIANGLES
-    )
-
-    // ------------------------------------------------------------------
-    // «Денди Классика» — image-скин: крупная чёрная крестовина-крест и
-    // красные круглые A/B (и турбо — те же картинки), тёмные капсулы
-    // START/SELECT — как на классическом Денди-геймпаде. Подписи (A, B…)
-    // рисуются приложением белым поверх картинок. Параметрические цвета
-    // оставлены в стиле классики — они применяются только к комбо-кнопкам.
-    // ------------------------------------------------------------------
-    private fun dendy() = ControlSkin(
-        id = "dendy",
-        title = "Денди Классика",
-        shapeMain = SkinShape.CIRCLE,
-        shapeMeta = SkinShape.PILL,
-        fill = Color.White,
-        // Рамка красная (акцент скина): параметрический рендер остаётся только
-        // у комбо-кнопок — в этом скине они красно-рамочные, как турбо
-        border = AccentRed,
-        turboBorder = AccentRed,
-        comboBorder = AccentRed,
-        label = Color.White,
-        monospace = false,
-        dpadFill = Color.White,
-        dpadStroke = Color.White,
-        dpadArrow = Color.White,
-        dpadArrowActive = AccentRed,
-        dpadDot = Color.White,
-        dpadVisual = DpadVisual.TRIANGLES,
-        imgDpad = R.drawable.skin_dendy_dpad,
-        imgButtons = mapOf(
-            "A" to R.drawable.skin_dendy_btn,
-            "B" to R.drawable.skin_dendy_btn,
-            "TA" to R.drawable.skin_dendy_btn,
-            "TB" to R.drawable.skin_dendy_btn,
-            "START" to R.drawable.skin_dendy_pill,
-            "SELECT" to R.drawable.skin_dendy_pill
-        )
-    )
-
-    // ------------------------------------------------------------------
-    // «Карбон» — image-скин: графитовые круги со светлым кольцом, крест
-    // со светлым контуром и ПАНЕЛЬ-подложка под всем блоком A/B
-    // (демонстрация imgBlock — картинка целым блоком под кнопками).
-    // ------------------------------------------------------------------
-    private fun carbon() = ControlSkin(
-        id = "carbon",
-        title = "Карбон",
-        shapeMain = SkinShape.CIRCLE,
-        shapeMeta = SkinShape.PILL,
-        fill = Color(0xFF0F0F14),
-        border = Color(0xFFA8A8B8),
-        turboBorder = Color(0xFFFF8A80),
-        comboBorder = Color(0xFFA8A8B8),
-        label = Color(0xFFF2F2F7),
-        monospace = false,
-        dpadFill = Color(0xFF15151C),
-        dpadStroke = Color(0xFFB8B8C4),
-        dpadArrow = Color(0xFFB8B8C4),
-        dpadArrowActive = Color(0xFFFF8A80),
-        dpadDot = Color(0xFFB8B8C4),
-        dpadVisual = DpadVisual.TRIANGLES,
-        imgDpad = R.drawable.skin_carbon_dpad,
-        imgButtons = mapOf(
-            "A" to R.drawable.skin_carbon_btn,
-            "B" to R.drawable.skin_carbon_btn,
-            "TA" to R.drawable.skin_carbon_btn,
-            "TB" to R.drawable.skin_carbon_btn,
-            "START" to R.drawable.skin_carbon_pill,
-            "SELECT" to R.drawable.skin_carbon_pill
-        ),
-        imgBlock = R.drawable.skin_carbon_panel
-    )
-
-    // ------------------------------------------------------------------
-    // «Аркада» — image-скин: металлическая пластина-крестовина с колпачком,
-    // выпуклые цветные кнопки (A — красная, B — жёлтая, как на аркадных
-    // джойстиках), капсулы цвета слоновой кости.
-    // ------------------------------------------------------------------
-    private fun arcade() = ControlSkin(
-        id = "arcade",
-        title = "Аркада",
-        shapeMain = SkinShape.CIRCLE,
-        shapeMeta = SkinShape.PILL,
-        fill = Color(0xFFF5EFE0),
-        border = Color(0xFF2E2E2E),
-        turboBorder = Color(0xFFC62828),
-        comboBorder = Color(0xFF2E2E2E),
-        label = Color(0xFF2E2E2E),
-        monospace = false,
-        dpadFill = Color(0xFF2B2B31),
-        dpadStroke = Color(0xFF6E6E78),
-        dpadArrow = Color(0xFF2E2E2E),
-        dpadArrowActive = AccentRed,
-        dpadDot = Color(0xFF2E2E2E),
-        dpadVisual = DpadVisual.TRIANGLES,
-        imgDpad = R.drawable.skin_arcade_dpad,
-        imgButtons = mapOf(
-            "A" to R.drawable.skin_arcade_btn_red,
-            "B" to R.drawable.skin_arcade_btn_yellow,
-            "TA" to R.drawable.skin_arcade_btn_red,
-            "TB" to R.drawable.skin_arcade_btn_yellow,
-            "START" to R.drawable.skin_arcade_pill,
-            "SELECT" to R.drawable.skin_arcade_pill
-        )
     )
 
     // ------------------------------------------------------------------
