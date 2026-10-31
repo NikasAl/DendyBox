@@ -810,11 +810,15 @@ internal data class ControlAlphas(
  *
  * Инвариант «комбо-кнопки в гармонии со скином»: у комбо-кнопок ("K*")
  * вид следует за активным [ControlSkin] точно как у обычных кнопок — форма
- * [ControlSkin.shapeMain], заливка [ControlSkin.fill], рамка
- * [ControlSkin.comboBorder], подпись [ControlSkin.label] (у комбо — всегда
- * ВНУТРИ кнопки: каптионы для них не включаются никогда), картинок нет.
- * Слайдер «Видимость» двигает их заливку/рамку/подпись теми же формулами,
- * что у всех; нажатие подсвечивает тем же бустом (+0.3 к альфе заливки).
+ * [ControlSkin.shapeMain], заливка [ControlSkin.comboFill] (переопределяется
+ * скинами; без переопределения — [ControlSkin.fill]), рамка
+ * [ControlSkin.comboBorder], подпись [ControlSkin.comboLabel] (без
+ * переопределения — [ControlSkin.label]; у комбо — всегда ВНУТРИ кнопки:
+ * каптионы для них не включаются никогда), картинок нет. В «Гаджете»
+ * переопределение даёт красное комбо в цвет турбо-кнопок-фото со светлой
+ * подписью. Слайдер «Видимость» двигает их заливку/рамку/подпись теми же
+ * формулами, что у всех; нажатие подсвечивает тем же бустом (+0.3 к альфе
+ * заливки).
  */
 internal data class ButtonLook(
     /** Картинка скина (res/drawable) или null — параметрический рендер. */
@@ -866,10 +870,14 @@ internal fun buttonLook(
     }
     val captionMode = skin.captions && specId in ControlSkin.IMAGEABLE_IDS
     val captionText = if (captionMode) skin.captionFor(specId, specLabel) else ""
+    // Комбо может переопределять заливку и подпись скина (в «Гаджете» —
+    // красное комбо в цвет турбо-кнопок-фото со светлой подписью)
+    val baseFill = if (isCombo) skin.comboFill ?: skin.fill else skin.fill
+    val baseLabel = if (isCombo) skin.comboLabel ?: skin.label else skin.label
     return ButtonLook(
         imageRes = skin.buttonImage(specId),
         shape = if (isPill) skin.shapeMeta else skin.shapeMain,
-        fill = skin.fill.copy(alpha = fillAlpha),
+        fill = baseFill.copy(alpha = fillAlpha),
         borderColor = when {
             isTurbo -> skin.turboBorder.copy(alpha = alphas.borderTurbo)
             // комбо-кнопки отличаются рамкой (в классике — красной, как турбо)
@@ -881,7 +889,7 @@ internal fun buttonLook(
             isCombo -> 1.5f
             else -> 2f
         },
-        labelColor = skin.label.copy(alpha = alphas.label),
+        labelColor = baseLabel.copy(alpha = alphas.label),
         captionMode = captionMode,
         captionText = captionText
     )

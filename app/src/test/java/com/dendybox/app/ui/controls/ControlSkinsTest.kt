@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.Color
 import com.dendybox.app.ui.AccentRed
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -13,15 +14,19 @@ import org.junit.Test
 /**
  * Скины кнопок управления ([ControlSkin]/[ControlSkins]) — чистый визуальный
  * конфиг. Ключевые инварианты:
- *  - набор СОКРАЩЁН до двух: «Классический» (дефолт, параметрика) и
- *    «Гаджет» (пакет-скин по фото-референсам, единственный с корпусом);
+ *  - набор — ТРИ скина: «Классический» (дефолт, параметрика), «Гаджет»
+ *    (пакет-скин по фото-референсам, единственный с корпусом) и «Приставка»
+ *    (фото-крестовина/кнопки классического геймпада, без корпуса);
  *  - «Классический» повторяет прежний захардкоженный вид: белые круги/пилюли,
  *    красная подсветка турбо и активных стрелок, стрелочная крестовина;
  *  - классика — дефолт и запасной скин для неизвестного id (в том числе для
  *    id удалённых скинов — неон/пиксель/тёмный/денди/карбон/аркада);
  *  - скины визуально различаются (иначе выбор бессмыслен);
  *  - все базовые цвета полностью непрозрачны: прозрачность принадлежит
- *    [ControlAlphas] (слайдер «Видимость»), скин только красит.
+ *    [ControlAlphas] (слайдер «Видимость»), скин только красит;
+ *  - переопределение комбо-кнопок (comboFill/comboLabel) — только у гаджета:
+ *    красное комбо в цвет турбо-кнопок-фото, у остальных скинов — обычные
+ *    fill/label.
  *
  * Image-механика (картинки из ресурсов) — в ControlImagesTest.
  */
@@ -30,20 +35,22 @@ class ControlSkinsTest {
     private val classic = ControlSkins.byId(ControlSkins.DEFAULT_ID)
 
     // ------------------------------------------------------------------
-    // Состав набора: ровно два скина
+    // Состав набора: ровно три скина
     // ------------------------------------------------------------------
 
     @Test
-    fun `в наборе ровно два скина классический и гаджет`() {
-        assertEquals(2, ControlSkins.ALL.size)
-        assertEquals(listOf("classic", "gadget"), ControlSkins.ALL.map { it.id })
+    fun `в наборе ровно три скина классический гаджет и приставка`() {
+        assertEquals(3, ControlSkins.ALL.size)
+        assertEquals(listOf("classic", "gadget", "console"), ControlSkins.ALL.map { it.id })
         assertEquals(
-            listOf("Классический", "Гаджет"),
+            listOf("Классический", "Гаджет", "Приставка"),
             ControlSkins.ALL.map { it.title }
         )
         // уникальность id и названий
-        assertEquals(2, ControlSkins.ALL.map { it.id }.toSet().size)
-        assertEquals(2, ControlSkins.ALL.map { it.title }.toSet().size)
+        assertEquals(3, ControlSkins.ALL.map { it.id }.toSet().size)
+        assertEquals(3, ControlSkins.ALL.map { it.title }.toSet().size)
+        // константа id совпадает со скином
+        assertSame(ControlSkins.byId("console"), ControlSkins.byId(ControlSkins.CONSOLE_ID))
         // удалённые скины больше не резолвятся
         for (removed in listOf("neon", "pixel", "dark", "dendy", "carbon", "arcade")) {
             assertSame("$removed: должен резолвиться в классику", classic, ControlSkins.byId(removed))
@@ -134,6 +141,45 @@ class ControlSkinsTest {
     }
 
     // ------------------------------------------------------------------
+    // «Приставка» — фото-крестовина/кнопки геймпада, без каптионов
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `приставка — светлые серые кнопки без каптионов и без переопределения комбо`() {
+        val console = ControlSkins.byId(ControlSkins.CONSOLE_ID)
+        assertEquals("console", ControlSkins.CONSOLE_ID)
+        // подписи ВНУТРИ кнопок (каптионов нет — корпуса у скина нет)
+        assertFalse(console.captions)
+        assertTrue(console.captionLabels.isEmpty())
+        assertEquals("A", console.captionFor("A", "A"))
+        // комбо — обычные цвета скина (без переопределения, как в классике)
+        assertNull(console.comboFill)
+        assertNull(console.comboLabel)
+        assertEquals(AccentRed, console.comboBorder)
+        // параметрика снята с фото: светло-серые кнопки, тёмный бевел и подпись
+        assertEquals(Color(0xFF837C6F), console.fill)
+        assertEquals(Color(0xFF444036), console.border)
+        assertEquals(Color(0xFF2E2B26), console.label)
+        // подсветка нажатых стрелок — красная, как у всех скинов
+        assertEquals(AccentRed, console.dpadArrowActive)
+    }
+
+    // ------------------------------------------------------------------
+    // Переопределение комбо-кнопок: только у гаджета
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `комбо-цвета переопределены только у гаджета`() {
+        val gadget = ControlSkins.byId("gadget")
+        assertNotNull(gadget.comboFill)
+        assertNotNull(gadget.comboLabel)
+        for (s in ControlSkins.ALL.filter { it.id != "gadget" }) {
+            assertNull("${s.id}: comboFill должен быть null", s.comboFill)
+            assertNull("${s.id}: comboLabel должен быть null", s.comboLabel)
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Скины различаются между собой
     // ------------------------------------------------------------------
 
@@ -166,6 +212,9 @@ class ControlSkinsTest {
             for ((i, c) in skin.colors().withIndex()) {
                 assertEquals("скин ${skin.id}, цвет #$i", 1f, c.alpha, 1e-6f)
             }
+            // переопределения комбо — тоже базовые краски (без альфы)
+            skin.comboFill?.let { assertEquals("${skin.id}: comboFill", 1f, it.alpha, 1e-6f) }
+            skin.comboLabel?.let { assertEquals("${skin.id}: comboLabel", 1f, it.alpha, 1e-6f) }
         }
     }
 

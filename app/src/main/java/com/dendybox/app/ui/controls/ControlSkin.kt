@@ -22,10 +22,11 @@ import com.dendybox.app.ui.AccentRed
  *  - смена скина живая: id хранится в SettingsStore.controlSkin (StateFlow),
  *    кнопки и крестовина перекрашиваются без перезапуска игры.
  *
- * НАБОР СКИНОВ СОКРАЩЁН ДО ДВУХ (по итогам ревью): «Классический» (дефолт,
- * параметрика) и «Гаджет» (пакет-скин по фото-референсам, единственный с
- * корпусом — DeviceSkins.forControlSkin). Прежние Неон/Пиксель/Тёмный/
- * Денди/Карбон/Аркада удалены вместе с их ассетами; сохранённый в настройках
+ * НАБОР СКИНОВ — ТРИ: «Классический» (дефолт, параметрика), «Гаджет»
+ * (пакет-скин по фото-референсам корпуса, единственный с корпусом —
+ * DeviceSkins.forControlSkin) и «Приставка» (фото-крестовина и кнопки
+ * классического геймпада, без корпуса). Прежние Неон/Пиксель/Тёмный/
+ * Денди/Карбон/Аркада удалены вместе с ассетами; сохранённый в настройках
  * старый id резолвится в классику (byId) — отдельной миграции не нужно.
  *
  * Картинки задаются ТРЕМЯ способами (механизм общескиновый):
@@ -58,6 +59,15 @@ data class ControlSkin(
     val turboBorder: Color,
     /** Рамка программируемых комбо-кнопок. */
     val comboBorder: Color,
+    /**
+     * Заливка комбо-кнопок ("K*") или null — обычная [fill]. Переопределяется
+     * скинами, где комбо должно выделяться цветом физической кнопки другого
+     * типа: в «Гаджете» комбо красные, как турбо-кнопки-фото (подпись
+     * комбо при этом светлая — см. [comboLabel]).
+     */
+    val comboFill: Color? = null,
+    /** Цвет подписи комбо-кнопок ("K*") или null — обычная [label]. */
+    val comboLabel: Color? = null,
     /** Цвет подписи на кнопках. */
     val label: Color,
     /** Моноширинный шрифт подписей (пиксель/ретро). */
@@ -139,11 +149,14 @@ object ControlSkins {
     /** Идентификатор скина «Гаджет» — единственного с корпусом (см. DeviceSkins). */
     const val GADGET_ID = "gadget"
 
+    /** Идентификатор скина «Приставка» (фото крестовины/кнопок геймпада). */
+    const val CONSOLE_ID = "console"
+
     /**
-     * Набор скинов — ровно два: «Классический» (первый — по нему resolve'ится
-     * неизвестный id) и «Гаджет». Остальные скины удалены по итогам ревью.
+     * Набор скинов — ровно три: «Классический» (первый — по нему resolve'ится
+     * неизвестный id), «Гаджет» и «Приставка». Прочие удалены по итогам ревью.
      */
-    val ALL: List<ControlSkin> = listOf(classic(), gadget())
+    val ALL: List<ControlSkin> = listOf(classic(), gadget(), console())
 
     /** Классический скин (= дефолт). */
     val DEFAULT: ControlSkin get() = byId(DEFAULT_ID)
@@ -182,8 +195,10 @@ object ControlSkins {
     // каптионы: у основных B/A их НЕТ (буква уже на кнопке — пустой
     // каптион не рисуется), над турбо — «TURBO» (как на корпусе),
     // над SELECT/START/SAVE/LOAD — их имена. Параметрические цвета
-    // остаются только комбо-кнопкам (белые с красной рамкой и тёмной
-    // подписью) и подсветке нажатых стрелок крестовины.
+    // остаются только подсветке нажатых стрелок крестовины и КОМБО-
+    // КНОПКАМ: они красные, как турбо-кнопки-фото (лицо #AC2829 и тёмная
+    // кромка #8A1D1C сняты с того же референса, skin_gadget_btn_ta),
+    // подпись комбо — светлая внутри (пользовательская, картинок нет).
     // Скин НЕ влияет на геометрию: зоны нажатий — по спекам, как у всех.
     // Единственный скин С КОРПУСОМ (DeviceSkins.forControlSkin) — подложка
     // вокруг кадра игры составляет с ним единый дизайн; у остальных
@@ -197,7 +212,9 @@ object ControlSkins {
         fill = Color.White,
         border = Color(0xFF3A3A42),
         turboBorder = AccentRed,
-        comboBorder = AccentRed,
+        comboBorder = Color(0xFF8A1D1C),
+        comboFill = Color(0xFFAC2829),
+        comboLabel = Color.White,
         label = Color(0xFF3A3A42),
         monospace = false,
         dpadFill = Color.White,
@@ -231,6 +248,48 @@ object ControlSkins {
             "PAUSE" to R.drawable.skin_gadget_pill,
             "MUTE" to R.drawable.skin_gadget_pill,
             "EDIT" to R.drawable.skin_gadget_pill
+        )
+    )
+
+    // ------------------------------------------------------------------
+    // «Приставка» — фото-элементы классического геймпада
+    // (scripts/photo_src/console_dpad.png — крестовина, console_btns.png —
+    // круглые кнопки; вырезки делает scripts/gen_console_images.py).
+    // Крестовина и основные кнопки (B/A и обе турбо — на референсе они
+    // одинаковые пустые круги) — ВЫРЕЗКИ ИЗ СНИМКОВ; подписи рисует
+    // приложение ВНУТРИ кнопок тёмным (каптионов нет: корпуса у скина
+    // нет, подписи НАД кнопками были бы нечитаемы на игре). Параметрика
+    // снята с тех же фото: лицо кнопки #837C6F, тёмный бевел #444036,
+    // тело крестовины #9F9A8F, стрелки #56524C (значения семплирует
+    // gen_console_images.py). SELECT/START/SAVE/LOAD и системные —
+    // параметрические пилюли в цвет фото-кнопок. Комбо — обычные для
+    // скина (светло-серые с красной рамкой); корпус отсутствует
+    // (DeviceSkins.forControlSkin — только у «Гаджета»). Скин НЕ влияет
+    // на геометрию: зоны нажатий — по спекам, как у всех.
+    // ------------------------------------------------------------------
+    private fun console() = ControlSkin(
+        id = CONSOLE_ID,
+        title = "Приставка",
+        shapeMain = SkinShape.CIRCLE,
+        shapeMeta = SkinShape.PILL,
+        fill = Color(0xFF837C6F),
+        border = Color(0xFF444036),
+        turboBorder = AccentRed,
+        comboBorder = AccentRed,
+        label = Color(0xFF2E2B26),
+        monospace = false,
+        dpadFill = Color(0xFF9F9A8F),
+        dpadStroke = Color(0xFF56524C),
+        dpadArrow = Color(0xFF56524C),
+        dpadArrowActive = AccentRed,
+        dpadDot = Color(0xFF56524C),
+        dpadVisual = DpadVisual.TRIANGLES,
+        imgDpad = R.drawable.skin_console_dpad,
+        imgButtons = mapOf(
+            "A" to R.drawable.skin_console_btn,
+            "B" to R.drawable.skin_console_btn,
+            "TA" to R.drawable.skin_console_btn,
+            "TB" to R.drawable.skin_console_btn
         )
     )
 }

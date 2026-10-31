@@ -12,8 +12,11 @@ import org.junit.Test
  * (res/drawable-nodpi) вместо параметрической формы/цветов. Ключевые
  * инварианты:
  *  - «Классический» (дефолт) картинок НЕ имеет — его вид не изменился;
- *  - «Гаджет» — единственный скин с картинками: крестовина и все физические
- *    кнопки — вырезки из фото-референсов (scripts/photo_src);
+ *  - «Гаджет» — крестовина и ВСЕ физические кнопки — вырезки из
+ *    фото-референсов корпуса (scripts/photo_src);
+ *  - «Приставка» — фото-крестовина и одна круглая кнопка на B/A/турбо;
+ *    пилюли SELECT/START/SAVE/LOAD и системные — параметрика (фото
+ *    не задано);
  *  - картинка разрешена ТОЛЬКО физическим кнопкам ([ControlSkin.IMAGEABLE_IDS]);
  *    у комбо-кнопок ("K*") подписи пользовательские — всегда параметрический
  *    рендер;
@@ -40,19 +43,35 @@ class ControlImagesTest {
     }
 
     // ------------------------------------------------------------------
-    // «Гаджет» — единственный скин с картинками
+    // «Гаджет» и «Приставка» — скины с картинками
     // ------------------------------------------------------------------
 
     @Test
-    fun `картинки есть только у гаджета`() {
-        for (s in ControlSkins.ALL.filter { it.id != "gadget" }) {
+    fun `картинки есть только у гаджета и приставки`() {
+        for (s in ControlSkins.ALL.filter { it.id != "gadget" && it.id != "console" }) {
             assertNull("${s.id}: крестовина", s.imgDpad)
             assertTrue("${s.id}: кнопки", s.imgButtons.isEmpty())
             assertNull("${s.id}: подложка", s.imgBlock)
         }
-        val g = skin("gadget")
-        assertNotNull(g.imgDpad)
-        assertTrue(g.imgButtons.isNotEmpty())
+        assertNotNull(skin("gadget").imgDpad)
+        assertTrue(skin("gadget").imgButtons.isNotEmpty())
+        assertNotNull(skin("console").imgDpad)
+        assertTrue(skin("console").imgButtons.isNotEmpty())
+    }
+
+    @Test
+    fun `приставка — фото-крестовина и круглая кнопка на B A и турбо`() {
+        val c = skin("console")
+        assertEquals(R.drawable.skin_console_dpad, c.imgDpad)
+        // на референсе все круглые кнопки одинаковые — одна вырезка на всех
+        for (btn in listOf("A", "B", "TA", "TB")) {
+            assertEquals("console: кнопка $btn", R.drawable.skin_console_btn, c.buttonImage(btn))
+        }
+        // пилюли SELECT/START/SAVE/LOAD и системные — параметрика в цвет фото-кнопок
+        for (id in listOf("START", "SELECT", "SAVE", "LOAD", "PAUSE", "MUTE", "EDIT")) {
+            assertNull("console: $id без картинки", c.buttonImage(id))
+        }
+        assertNull("console: без подложки", c.imgBlock)
     }
 
     @Test

@@ -12,9 +12,13 @@ import org.junit.Test
  * "Видимость" + нажатие». Главный контракт (задача «стилизовать комбо-кнопки
  * в гармонии с остальным скином»):
  *  - у комбо-кнопок ("K*") вид следует за активным ControlSkin ТОЧНО как у
- *    обычных кнопок: форма [ControlSkin.shapeMain], заливка [ControlSkin.fill],
- *    рамка [ControlSkin.comboBorder], подпись [ControlSkin.label]; картинок
- *    у комбо нет, каптионы не включаются никогда (подпись всегда внутри);
+ *    обычных кнопок: форма [ControlSkin.shapeMain], заливка
+ *    [ControlSkin.comboFill] (без переопределения — [ControlSkin.fill]),
+ *    рамка [ControlSkin.comboBorder], подпись [ControlSkin.comboLabel]
+ *    (без переопределения — [ControlSkin.label]); картинок у комбо нет,
+ *    каптионы не включаются никогда (подпись всегда внутри);
+ *  - в «Гаджете» переопределение даёт КРАСНОЕ комбо в цвет турбо-кнопок-фото
+ *    со светлой подписью (задача «комбо не соответствуют общему стилю»);
  *  - слайдер «Видимость» двигает комбо-кнопки теми же формулами, что все:
  *    заливка = opacity, рамка/подпись = веса ControlAlphas, нажатие
  *    подсвечивает бустом +0.3 к альфе заливки (с капом 1);
@@ -43,8 +47,8 @@ class ButtonLookTest {
             val l = look(skin.id, "Ku1")
             assertEquals("${skin.id}: форма = shapeMain", skin.shapeMain, l.shape)
             assertEquals(
-                "${skin.id}: заливка = fill с альфой слайдера",
-                skin.fill.copy(alpha = 0.55f),
+                "${skin.id}: заливка = comboFill (или fill) с альфой слайдера",
+                (skin.comboFill ?: skin.fill).copy(alpha = 0.55f),
                 l.fill
             )
             assertEquals(
@@ -54,8 +58,8 @@ class ButtonLookTest {
             )
             assertEquals("${skin.id}: рамка 1.5dp", 1.5f, l.borderWidthDp, 1e-6f)
             assertEquals(
-                "${skin.id}: подпись = label с весом label",
-                skin.label.copy(alpha = alphas(0.55f).label),
+                "${skin.id}: подпись = comboLabel (или label) с весом label",
+                (skin.comboLabel ?: skin.label).copy(alpha = alphas(0.55f).label),
                 l.labelColor
             )
             assertNull("${skin.id}: комбо без картинки", l.imageRes)
@@ -66,14 +70,41 @@ class ButtonLookTest {
     }
 
     @Test
+    fun `комбо гаджета — красная как турбо-кнопка со светлой подписью`() {
+        val g = ControlSkins.byId("gadget")
+        val l = look("gadget", "K1")
+        // лицо турбо-кнопки-фото (skin_gadget_btn_ta): насыщенный красный
+        val f = g.comboFill!!
+        assertTrue("не красный: $f", f.red > 0.55f && f.red - f.green > 0.4f && f.red - f.blue > 0.4f)
+        // кромка темнее лица — как тень на фото-кнопке (не яркая AccentRed)
+        val b = g.comboBorder
+        assertTrue("рамка не темнее лица", b.red < f.red && b.green < f.green && b.blue < f.blue)
+        assertTrue("рамка не красная: $b", b.red - b.green > 0.3f)
+        // подпись комбо светлая — читается на красном (обычная label тёмная)
+        val c = g.comboLabel!!
+        assertTrue("подпись не светлая: $c", minOf(c.red, c.green, c.blue) > 0.9f)
+        assertTrue(c != g.label)
+        // вид комбо берёт именно переопределённые цвета скина
+        assertEquals(f.copy(alpha = 0.55f), l.fill)
+        assertEquals(c.copy(alpha = alphas(0.55f).label), l.labelColor)
+        assertEquals(b.copy(alpha = alphas(0.55f).borderMain), l.borderColor)
+    }
+
+    @Test
     fun `смена скина меняет вид комбо-кнопки`() {
         val classic = look("classic", "Kx")
         val gadget = look("gadget", "Kx")
-        // у обоих скинов комбо — белые круги с красной рамкой, различие —
-        // в цвете подписи: тёмная на светлом корпусе гаджета
+        val console = look("console", "Kx")
+        // у всех форма круг; гаджет — красное комбо: заливка и тёмно-красная
+        // рамка отличаются от классики (белая с AccentRed) и приставки (серая);
+        // подпись у гаджета и классики одинаково светлая, у приставки тёмная
         assertEquals(classic.shape, gadget.shape)
-        assertEquals(classic.borderColor, gadget.borderColor)
-        assertTrue(classic.labelColor != gadget.labelColor)
+        assertEquals(classic.shape, console.shape)
+        assertTrue(classic.fill != gadget.fill)
+        assertTrue(classic.borderColor != gadget.borderColor)
+        assertTrue(gadget.fill != console.fill)
+        assertTrue(gadget.borderColor != console.borderColor)
+        assertTrue(classic.labelColor != console.labelColor)
     }
 
     // ------------------------------------------------------------------
