@@ -16,6 +16,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
+import com.dendybox.app.emulator.EmulatorEngine
+import com.dendybox.app.emulator.FRect
 
 /**
  * Скин «корпуса» — декоративный слой-гаджет ПОД ВСЕЙ игровой поверхностью:
@@ -121,6 +123,15 @@ object DeviceSkins {
     fun forControlSkin(controlSkinId: String): DeviceSkin =
         if (controlSkinId == ControlSkins.GADGET_ID) byId(ControlSkins.GADGET_ID) else DEFAULT
 
+    /**
+     * Резерв кадра под корпус [skin] в dp: отступ тела + зазор + безель —
+     * столько движок оставляет вокруг кадра ([EmulatorEngine.shellReservePx]),
+     * чтобы корпус целиком вмещал картинку даже при почти нулевых полях
+     * letterbox. У выключенного скина («нет корпуса») резерва нет — 0.
+     */
+    fun reserveDp(skin: DeviceSkin): Float =
+        if (skin.enabled) skin.bodyMarginDp + skin.bezelGapDp + skin.bezelWidthDp else 0f
+
     private fun none() = DeviceSkin(
         id = NONE_ID,
         title = "Нет",
@@ -177,52 +188,50 @@ fun DeviceShellLayer(framePx: RectF, skin: DeviceSkin, alpha: Float = 1f) {
  * прямоугольник минус «окно» кадра, even-odd), контур тела, безель
  * (кольцо между окном и кадром) и колонки отверстий динамиков в
  * свободных полосах слева/справа от окна. Всё зажимается в границы
- * корпуса; на узких полосах (маленькие экраны) динамики не рисуются.
+ * поверхности (см. [shellRects]); на узких полосах динамики не рисуются.
  */
 internal fun DrawScope.drawShell(area: Size, frame: RectF, skin: DeviceSkin) {
     val m = skin.bodyMarginDp.dp.toPx()
-    if (area.width <= 2 * m || area.height <= 2 * m) return
-    val corner = skin.bodyCornerDp.dp.toPx()
     val gap = skin.bezelGapDp.dp.toPx()
     val bezel = skin.bezelWidthDp.dp.toPx()
-
-    // «Окно» корпуса: кадр игры + зазор + толщина безеля, в границах тела
-    val winL = (frame.left - gap - bezel).coerceAtLeast(m)
-    val winT = (frame.top - gap - bezel).coerceAtLeast(m)
-    val winR = (frame.right + gap + bezel).coerceAtMost(area.width - m)
-    val winB = (frame.bottom + gap + bezel).coerceAtMost(area.height - m)
-    if (winR - winL <= 0f || winB - winT <= 0f) return
+    val (body, win) = shellRects(
+        area.width, area.height,
+        FRect(frame.left, frame.top, frame.right, frame.bottom),
+        m, gap, bezel
+    )
+    if (win.width <= 0f || win.height <= 0f) return
+    val corner = skin.bodyCornerDp.dp.toPx()
 
     // 1. Тело: внешний прямоугольник минус окно (even-odd — окно прозрачно,
     //    сквозь него видна игра)
-    val body = Path().apply {
+    val bodyPath = Path().apply {
         fillType = PathFillType.EvenOdd
         addRoundRect(
-            RoundRect(m, m, area.width - m, area.height - m, CornerRadius(corner))
+            RoundRect(body.left, body.top, body.right, body.bottom, CornerRadius(corner))
         )
-        addRect(CRect(winL, winT, winR, winB))
+        addRect(CRect(win.left, win.top, win.right, win.bottom))
     }
-    drawPath(body, skin.bodyColor)
+    drawPath(bodyPath, skin.bodyColor)
 
     // 2. Контур тела
     drawRoundRect(
         color = skin.bodyStroke,
-        topLeft = Offset(m, m),
-        size = Size(area.width - 2 * m, area.height - 2 * m),
+        topLeft = Offset(body.left, body.top),
+        size = Size(body.width, body.height),
         cornerRadius = CornerRadius(corner),
         style = Stroke(1.dp.toPx())
     )
 
     // 3. Безель: кольцо между окном и кадром (+зазор) — рамка «экрана»
-    val innerL = (frame.left - gap).coerceIn(winL, winR)
-    val innerT = (frame.top - gap).coerceIn(winT, winB)
-    val innerR = (frame.right + gap).coerceIn(winL, winR)
-    val innerB = (frame.bottom + gap).coerceIn(winL, winB)
+    val innerL = (frame.left - gap).coerceIn(win.left, win.right)
+    val innerT = (frame.top - gap).coerceIn(win.top, win.bottom)
+    val innerR = (frame.right + gap).coerceIn(win.left, win.right)
+    val innerB = (frame.bottom + gap).coerceIn(win.top, win.bottom)
     if (innerR - innerL > 0f && innerB - innerT > 0f) {
         val bezelPath = Path().apply {
             fillType = PathFillType.EvenOdd
             addRoundRect(
-                RoundRect(winL, winT, winR, winB, CornerRadius(skin.bezelCornerDp.dp.toPx()))
+                RoundRect(win.left, win.top, win.right, win.bottom, CornerRadius(skin.bezelCornerDp.dp.toPx()))
             )
             addRect(CRect(innerL, innerT, innerR, innerB))
         }
@@ -230,31 +239,65 @@ internal fun DrawScope.drawShell(area: Size, frame: RectF, skin: DeviceSkin) {
     }
 
     // 4. Динамики: колонки точек в свободных полосах между телом и окном
-    drawSpeakers(area, m, winL, winR, skin)
+    drawSpeakers(body, win, skin)
+}
+
+/**
+ * Геометрия корпуса — ЧИСТАЯ функция (px, JVM-тестируемая): окно корпуса —
+ * кадр, раздвинутый на зазор+безель и зажатый в границы ПОВЕРХНОСТИ; тело —
+ * окно, раздвинутое на отступ тела и зажатое в поверхность. Ключевое
+ * отличие от прежней версии: раньше окно зажималось в тело с фиксированным
+ * отступом, и на узких полях letterbox (высота поверхности, кратная 240, —
+ * кадр касается краёв) безель/кадр резались краем тела — фрейм «выступал»
+ * за корпус. Теперь НАОБОРОТ: тело расширяется вслед за окном вплоть до
+ * края поверхности — корпус всегда накрывает кадр, насколько позволяет
+ * экран. Резерв, оставляемый вокруг кадра самим движком
+ * ([EmulatorEngine.shellReservePx]), гарантирует, что при активном корпусе
+ * полей хватает на полный запас (отступ+зазор+безель).
+ */
+internal fun shellRects(
+    areaW: Float,
+    areaH: Float,
+    frame: FRect,
+    marginPx: Float,
+    gapPx: Float,
+    bezelPx: Float
+): Pair<FRect, FRect> {
+    // «Окно» корпуса: кадр + зазор + толщина безеля, в границах поверхности
+    val winL = (frame.left - gapPx - bezelPx).coerceIn(0f, areaW)
+    val winT = (frame.top - gapPx - bezelPx).coerceIn(0f, areaH)
+    val winR = (frame.right + gapPx + bezelPx).coerceIn(winL, areaW)
+    val winB = (frame.bottom + gapPx + bezelPx).coerceIn(winT, areaH)
+
+    // Тело: окно + отступ, в границах поверхности (отступ сжимается,
+    // но тело ВСЕГДА накрывает окно целиком)
+    val bodyL = (winL - marginPx).coerceAtLeast(0f)
+    val bodyT = (winT - marginPx).coerceAtLeast(0f)
+    val bodyR = (winR + marginPx).coerceAtMost(areaW)
+    val bodyB = (winB + marginPx).coerceAtMost(areaH)
+    return FRect(bodyL, bodyT, bodyR, bodyB) to FRect(winL, winT, winR, winB)
 }
 
 /**
  * Отверстия динамиков: вертикальная колонка из [DeviceSkin.speakerCount]
- * точек по центру каждой свободной полосы (слева и справа от окна).
- * Полоса уже трёх радиусов (маленький экран, кадр почти во всю ширину) —
- * колонка в ней не помещается и пропускается: деградация без мусора.
+ * точек по центру каждой свободной полосы (между телом и окном слева
+ * и справа). Полоса уже трёх радиусов (маленький экран, кадр почти во всю
+ * ширину) — колонка в ней не помещается и пропускается: деградация без
+ * мусора.
  */
 private fun DrawScope.drawSpeakers(
-    area: Size,
-    marginPx: Float,
-    winL: Float,
-    winR: Float,
+    body: FRect,
+    win: FRect,
     skin: DeviceSkin
 ) {
     val n = skin.speakerCount
     if (n <= 0) return
     val r = skin.speakerRadiusDp.dp.toPx()
     val step = skin.speakerStepDp.dp.toPx()
-    val cy = area.height / 2f
+    val cy = (body.top + body.bottom) / 2f
     val top = cy - (n - 1) * step / 2f
-    val rightEdge = area.width - marginPx
-    for (cx in listOf((marginPx + winL) / 2f, (winR + rightEdge) / 2f)) {
-        val strip = minOf(cx - marginPx, rightEdge - cx)
+    for (cx in listOf((body.left + win.left) / 2f, (win.right + body.right) / 2f)) {
+        val strip = minOf(cx - body.left, body.right - cx)
         if (strip < r * 3f) continue
         for (i in 0 until n) {
             drawCircle(skin.speakerColor, radius = r, center = Offset(cx, top + i * step))

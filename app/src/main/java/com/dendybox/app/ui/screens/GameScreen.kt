@@ -20,12 +20,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.dendybox.app.cheats.CheatRepository
 import com.dendybox.app.emulator.EmulatorEngine
@@ -86,6 +88,18 @@ fun GameScreen(
     val gadgetSkinActive = DeviceSkins.forControlSkin(controlSkinId).enabled
     LaunchedEffect(gadgetSkinActive) {
         if (gadgetSkinActive) layoutStore.applyGadgetPresetOnce()
+    }
+    // Резерв кадра под корпус: с активным скином «Гаджет» движок оставляет
+    // вокруг картинки запас (отступ тела + зазор + безель, px из Density) —
+    // корпус целиком вмещает фрейм по вертикали даже при почти нулевых
+    // полях letterbox (HD+-экраны с высотой, кратной 240: раньше фрейм
+    // выступал за верхнюю/нижнюю кромку корпуса). Классика — без резерва,
+    // вид по умолчанию не меняется. frameRect без аргумента читает тот же
+    // резерв — окно корпуса всегда совпадает с нарисованной картинкой.
+    val shellSkin = DeviceSkins.forControlSkin(controlSkinId)
+    val density = LocalDensity.current
+    SideEffect {
+        engine.setShellReserve(with(density) { DeviceSkins.reserveDp(shellSkin).dp.toPx() })
     }
     LaunchedEffect(twoLocal) {
         // при первом включении — один раз расставить P1 слева / P2 справа

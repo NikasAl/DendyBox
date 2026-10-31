@@ -82,6 +82,17 @@ class DeviceSkinsTest {
     }
 
     @Test
+    fun `резерв кадра под корпус равен отступу зазору и безелю`() {
+        // «Гаджет»: 6 + 3 + 8 = 17dp — столько движок оставляет вокруг кадра
+        // (EmulatorEngine.shellReservePx), чтобы корпус вмещал фрейм целиком
+        val gadget = DeviceSkins.byId("gadget")
+        assertEquals(17f, DeviceSkins.reserveDp(gadget), 1e-6f)
+        // «нет корпуса» — резерв не нужен, вид по умолчанию не меняется
+        assertEquals(0f, DeviceSkins.reserveDp(DeviceSkins.DEFAULT), 1e-6f)
+        assertEquals(0f, DeviceSkins.reserveDp(DeviceSkins.byId("неизвестный")), 1e-6f)
+    }
+
+    @Test
     fun `базовые цвета всех скинов корпуса полностью непрозрачны`() {
         for (skin in DeviceSkins.ALL) {
             for ((i, c) in skin.colors().withIndex()) {

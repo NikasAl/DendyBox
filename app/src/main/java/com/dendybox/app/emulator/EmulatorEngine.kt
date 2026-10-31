@@ -32,7 +32,6 @@ import java.security.MessageDigest
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.concurrent.thread
 import kotlin.math.floor
-import kotlin.math.min
 
 /**
  * Движок эмуляции: поток цикла кадров, звук (AudioTrack), отрисовка (Canvas blit
@@ -482,17 +481,48 @@ class EmulatorEngine(private val context: Context) {
 
     /**
      * Прямоугольник игрового кадра на поверхности [vw]×[vh] px — letterbox
-     * с целым масштабированием (та же математика, что в drawFrame).
-     * Используется UI (редактор управления), чтобы привязываться к картинке.
+     * с целым масштабированием (та же математика, что в drawFrame; детали —
+     * в [FrameMath.letterbox]). Используется UI (редактор управления, слой
+     * корпуса), чтобы привязываться к картинке.
+     *
+     * [reservePx] — запас под корпус скина «Гаджет» (отступ тела + зазор +
+     * безель): движок держит его в [shellReservePx] и применяет при отрисовке
+     * кадра; UI вызывает frameRect без аргумента и получает ТОТ ЖЕ
+     * прямоугольник, что рисует поверхность, — окно корпуса всегда совпадает
+     * с картинкой. При reservePx = 0 — прежний вид без изменений.
      */
-    fun frameRect(vw: Int, vh: Int): RectF {
-        val s0 = min(vw / frameW.toFloat(), vh / frameH.toFloat())
-        val scale = if (s0 >= 1f) floor(s0) else s0
-        val w = frameW * scale
-        val hh = frameH * scale
-        val l = (vw - w) / 2f
-        val t = (vh - hh) / 2f
-        return RectF(l, t, l + w, t + hh)
+    fun frameRect(vw: Int, vh: Int, reservePx: Float = shellReservePx): RectF {
+        val r = FrameMath.letterbox(vw.toFloat(), vh.toFloat(), frameW.toFloat(), frameH.toFloat(), reservePx)
+        return RectF(r.left, r.top, r.right, r.bottom)
+    }
+
+    /**
+     * Резерв вокруг кадра под корпус скина (px), 0 — без корпуса. Меняет
+     * drawFrame и все frameRect без явного аргумента — картинка и окно
+     * корпуса всегда согласованы. @Volatile: читается потоком эмуляции,
+     * пишется через [setShellReserve] из UI-потока.
+     */
+    @Volatile
+    var shellReservePx: Float = 0f
+        private set
+
+    /**
+     * Установить резерв корпуса [px] и перерисовать текущий кадр, если игра
+     * на паузе: цикл рисует только на ходу, без этого окно корпуса (Compose,
+     * обновляется сразу) разошлось бы с застывшей картинкой до возобновления.
+     * Оп через [ops] выполняется и на паузе (poll стоит до проверки paused).
+     */
+    fun setShellReserve(px: Float) {
+        shellReservePx = px
+        ops.add {
+            if (paused) {
+                val h = holder
+                val bmp = frameBitmap
+                if (h != null && bmp != null) {
+                    drawFrame(h, bmp, Paint().apply { isFilterBitmap = true })
+                }
+            }
+        }
     }
 
     /**
