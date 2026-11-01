@@ -40,7 +40,6 @@
   "tmnt4in1.nes": {
     "flavor": "tmnt4in1",
     "title": "Черепашки Ниндзя",
-    "menuOffsetX": 0.12,
     "games": [
       { "file": "t_tmnt.nes",             "title": "Черепашки Ниндзя",
         "combos": [

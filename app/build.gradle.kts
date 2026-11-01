@@ -36,7 +36,7 @@ plugins {
 //   "kontra8in1.nes": {
 //     "flavor": "kontra8in1", "title": "Контра: Сборник",
 //     "menuAlign": "left",   // выравнивание меню: left|center|right (по умолчанию center)
-//     "menuOffsetX": 0.25,    // сдвиг блока меню от menuAlign, доля ширины экрана (-1..1, 0.25 = 25% вправо; по умолчанию 0)
+//     "menuOffsetX": 0.25,    // сдвиг блока меню от menuAlign, доля ширины экрана (-1..1, 0.25 = 25% вправо; не задано — автоподбор по постеру)
 //     "games": [
 //       { "file": "25_Contra.nes",       "title": "Контра" },
 //       { "file": "24_Super_Contra.nes", "title": "Супер Контра" }
@@ -90,7 +90,8 @@ data class GameSpec(
     val versionName: String,
     val collection: List<CollectionGame>?, // != null — flavor-сборник «X in 1»
     val menuAlign: String,                 // выравнивание меню сборника: left|center|right
-    val menuOffsetX: Double                // сдвиг блока меню от menuAlign, доля ширины экрана (-1..1, по умолчанию 0)
+    val menuOffsetX: Double,               // сдвиг блока меню от menuAlign, доля ширины экрана (-1..1, по умолчанию 0)
+    val menuOffsetXExplicit: Boolean       // задан ли menuOffsetX явно в games.json (иначе при center-выравнивании — автоподбор по постеру)
 )
 
 // Массив "games" в записи games.json — сборник. Каждый элемент: {"file":
@@ -176,8 +177,8 @@ private fun parseMenuAlign(o: Map<*, *>, name: String): String {
 // Горизонтальный сдвиг блока меню сборника (menuOffsetX): число в долях
 // ширины экрана (-1..1), добавляется к позиции menuAlign (0.25 = 25% вправо).
 // По умолчанию 0 (сдвига нет). Ошибки — GradleException, чтобы упасть сразу в сборке.
-private fun parseMenuOffsetX(o: Map<*, *>, name: String): Double {
-    val raw = o["menuOffsetX"] ?: return 0.0
+private fun parseMenuOffsetX(o: Map<*, *>, name: String): Pair<Double, Boolean> {
+    val raw = o["menuOffsetX"] ?: return Pair(0.0, false)
     if (raw !is Number) {
         throw GradleException(
             "roms/games.json [$name]: menuOffsetX должен быть числом (-1..1), получено: $raw"
@@ -189,7 +190,44 @@ private fun parseMenuOffsetX(o: Map<*, *>, name: String): Double {
             "roms/games.json [$name]: menuOffsetX должен быть в диапазоне -1..1 (доля ширины экрана), получено: $value"
         )
     }
-    return value
+    return Pair(value, true)
+}
+
+// Автоподбор menuOffsetX по постеру меню (scripts/pick_menu_offset.py, нужен
+// python3 + Pillow): симулирует Crop постера на альбомном экране и ищет
+// наименее «занятую» полосу шириной блока меню. Запускается только когда
+// menuOffsetX не задан явно И меню по центру (menuAlign=center: при
+// left/right блок уже вручную притянут — авто-сдвиг не применяем). Без
+// python3/Pillow или при ошибке скрипта — сдвига нет (0.0).
+val pickMenuOffsetScript = rootProject.file("scripts/pick_menu_offset.py")
+
+fun pickMenuOffsetX(poster: File, flavor: String): Double {
+    if (!pickMenuOffsetScript.exists()) {
+        println("DendyBox: [$flavor] нет ${pickMenuOffsetScript.path} — автоподбор menuOffsetX недоступен")
+        return 0.0
+    }
+    return try {
+        val process = ProcessBuilder(
+            "python3", pickMenuOffsetScript.absolutePath,
+            "--align", "center",
+            poster.absolutePath
+        ).start()
+        val stdout = process.inputStream.bufferedReader().readText().trim()
+        val stderr = process.errorStream.bufferedReader().readText().trim()
+        process.waitFor()
+        if (process.exitValue() != 0) {
+            println("DendyBox: [$flavor] автоподбор menuOffsetX не удался (exit ${process.exitValue()}) — сдвига нет: $stderr")
+            0.0
+        } else {
+            val value = stdout.toDouble()
+            if (stderr.isNotEmpty()) println("DendyBox: [$flavor] menuOffsetX: $stderr")
+            println("DendyBox: [$flavor] menuOffsetX автоподобран: $value (из постера меню ${poster.name})")
+            value
+        }
+    } catch (e: Exception) {
+        println("DendyBox: [$flavor] автоподбор menuOffsetX недоступен (${e.message}) — сдвига нет")
+        0.0
+    }
 }
 
 fun sanitizeFlavorName(raw: String): String {
@@ -266,7 +304,8 @@ val gameSpecs: List<GameSpec> = run {
             parseVersionCode(o, name), parseVersionName(o, name),
             if (collection.isEmpty()) null else collection,
             parseMenuAlign(o, name),
-            parseMenuOffsetX(o, name)
+            parseMenuOffsetX(o, name).first,
+            parseMenuOffsetX(o, name).second
         )
     }
     val dup = specs.groupBy { it.flavor }.filterValues { it.size > 1 }.keys
@@ -541,6 +580,8 @@ gameSpecs.forEach { spec ->
         // games.json — источник заголовков/пресетов комбо манифеста: правка
         // файла должна пересобирать манифест, а не отдавать устаревший
         if (gamesJsonFile.exists()) inputs.file(gamesJsonFile)
+        // Скрипт автоподбора menuOffsetX — тоже вход: правка анализа меняет манифест
+        if (pickMenuOffsetScript.exists()) inputs.file(pickMenuOffsetScript)
         doLast {
             val dir = outDir.get().asFile
             dir.mkdirs()
@@ -574,11 +615,17 @@ gameSpecs.forEach { spec ->
                 val esc: (String) -> String = { s ->
                     s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "").replace("\t", " ")
                 }
+                // Сдвиг блока меню под постер: явный menuOffsetX (из roms/games.json)
+                // побеждает; не задан + меню по центру — автоподбор по постеру
+                var menuOffsetX = spec.menuOffsetX
+                if (!spec.menuOffsetXExplicit && spec.menuAlign == "center" && bgName != null) {
+                    menuOffsetX = pickMenuOffsetX(gamesDir.resolve(bgName), spec.flavor)
+                }
                 val manifest = StringBuilder("{")
                 if (!spec.title.isNullOrBlank()) manifest.append("\"title\":\"${esc(spec.title)}\",")
                 if (bgName != null) manifest.append("\"background\":\"$bgName\",")
                 if (spec.menuAlign != "center") manifest.append("\"menuAlign\":\"${spec.menuAlign}\",")
-                if (spec.menuOffsetX != 0.0) manifest.append("\"menuOffsetX\":${JsonOutput.toJson(spec.menuOffsetX)},")
+                if (menuOffsetX != 0.0) manifest.append("\"menuOffsetX\":${JsonOutput.toJson(menuOffsetX)},")
                 manifest.append("\"games\":[")
                 spec.collection.forEachIndexed { i, g ->
                     val dst = gamesDir.resolve("$i.${g.file.extension.lowercase()}")
