@@ -24,6 +24,7 @@ data class CollectionData(
     val title: String?,
     val background: String?, // assets-путь постера меню («games/background.webp»), null — нет
     val menuAlign: String,   // выравнивание блоков меню: left | center | right
+    val menuOffsetX: Double = 0.0, // сдвиг блока меню от menuAlign, доля ширины экрана (-1..1)
     val games: List<CollectionEntry>
 )
 
@@ -35,6 +36,7 @@ data class CollectionData(
  * { "title": "Контра: Сборник",
  *   "background": "background.webp",
  *   "menuAlign": "left",
+ *   "menuOffsetX": 0.25,
  *   "games": [ {"file": "0.nes", "title": "Контра",
  *               "combos": [ {"name": "Автоогонь", "steps": [{"b":"B","d":0,"h":500}]} ]},
  *              {"file": "1.nes", "title": "Супер Контра"} ] }
@@ -101,10 +103,17 @@ object CollectionCatalog {
             // в манифест попадает только не-center — см. build.gradle.kts)
             val align = root.optString("menuAlign").takeUnless { it.isBlank() }
                 ?.takeIf { it == "left" || it == "right" || it == "center" } ?: "center"
+            // Сдвиг блока меню от позиции выравнивания, доля ширины экрана (-1..1).
+            // Валидность гарантирует сборка (build.gradle.kts); на рантайме —
+            // тихий кламп: битое значение не должно ронять меню целиком.
+            val offsetX = if (root.has("menuOffsetX")) {
+                (root.opt("menuOffsetX") as? Number)?.toDouble() ?: 0.0
+            } else 0.0
             CollectionData(
                 title = root.optString("title").takeUnless { it.isBlank() },
                 background = background,
                 menuAlign = align,
+                menuOffsetX = offsetX.coerceIn(-1.0, 1.0),
                 games = games
             )
         }

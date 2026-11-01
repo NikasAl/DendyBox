@@ -38,6 +38,35 @@ class CollectionCatalogTest {
     }
 
     @Test
+    fun `menuOffsetX — смещение блока меню в долях ширины экрана`() {
+        // Заданное значение — читается
+        val data = CollectionCatalog.parse(
+            """{ "menuOffsetX": 0.25, "games": [ { "file": "0.nes" }, { "file": "1.nes" } ] }"""
+        )!!
+        assertEquals(0.25, data.menuOffsetX, 0.0)
+        // Отсутствует — 0.0 (поведение как раньше)
+        val default = CollectionCatalog.parse(
+            """{ "games": [ { "file": "0.nes" }, { "file": "1.nes" } ] }"""
+        )!!
+        assertEquals(0.0, default.menuOffsetX, 0.0)
+        // Вне допустимого диапазона — кламп в -1..1 (валидность гарантирует сборка)
+        val big = CollectionCatalog.parse(
+            """{ "menuOffsetX": 5.0, "games": [ { "file": "0.nes" }, { "file": "1.nes" } ] }"""
+        )!!
+        assertEquals(1.0, big.menuOffsetX, 0.0)
+        // Не-число — тихо 0.0 (битое значение не должно ронять меню целиком)
+        val bad = CollectionCatalog.parse(
+            """{ "menuOffsetX": "право", "games": [ { "file": "0.nes" }, { "file": "1.nes" } ] }"""
+        )!!
+        assertEquals(0.0, bad.menuOffsetX, 0.0)
+        // Отрицательное — сохраняется
+        val neg = CollectionCatalog.parse(
+            """{ "menuOffsetX": -0.5, "games": [ { "file": "0.nes" }, { "file": "1.nes" } ] }"""
+        )!!
+        assertEquals(-0.5, neg.menuOffsetX, 0.0)
+    }
+
+    @Test
     fun `пресеты комбо читаются из записи игры`() {
         val data = CollectionCatalog.parse(
             """

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -70,6 +71,8 @@ import com.dendybox.app.settings.CollectionEntry
  * Выравнивание всех блоков по горизонтали — menuAlign из манифеста
  * (left/center/right; в games.json сборника, по умолчанию center): под
  * постер, у которого композиция смещена к краю.
+ * menuOffsetX (доля ширины экрана, -1..1; по умолчанию 0) добавляется к
+ * позиции menuAlign — точная подгонка блока меню к композиции постера.
  */
 
 private val NesYellow = Color(0xFFF8B800)
@@ -104,6 +107,7 @@ fun CollectionMenu(
     collectionTitle: String?,
     background: String?, // assets-путь постера (null/битый — чёрный фон)
     menuAlign: String?,  // left | center | right (из манифеста сборника)
+    menuOffsetX: Double = 0.0, // сдвиг блока от menuAlign, доля ширины экрана (-1..1)
     games: List<CollectionEntry>,
     onPick: (Int) -> Unit,
     onExit: () -> Unit
@@ -128,6 +132,10 @@ fun CollectionMenu(
     val itemMaxWidth = LocalConfiguration.current.screenWidthDp.dp - 48.dp
     val h = hAlign(menuAlign)
     val t = tAlign(h)
+    // Точная подгонка к композиции постера: смещение блока от позиции menuAlign,
+    // доля ширины экрана (постер и затемнение остаются на месте — двигается
+    // только контент-блок)
+    val offsetX = LocalConfiguration.current.screenWidthDp.dp * menuOffsetX.coerceIn(-1.0, 1.0).toFloat()
 
     Box(
         Modifier
@@ -167,7 +175,9 @@ fun CollectionMenu(
             // Ширина = максимум из ширины шапки, плашек и футера (ограничено
             // шириной экрана минус поля): разделители получаются ровно по блокам.
             Column(
-                Modifier.width(IntrinsicSize.Max),
+                Modifier
+                    .width(IntrinsicSize.Max)
+                    .offset(x = offsetX),
                 horizontalAlignment = h
             ) {
                 // ---- Шапка: «N ИГР В 1» + название сборника ----

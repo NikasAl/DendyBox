@@ -249,6 +249,7 @@ private fun AppRoot() {
             collectionTitle = collection.title,
             background = collection.background,
             menuAlign = collection.menuAlign,
+            menuOffsetX = collection.menuOffsetX,
             games = collection.games,
             onPick = { idx ->
                 romMissing = false

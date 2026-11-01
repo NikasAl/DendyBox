@@ -36,6 +36,7 @@ plugins {
 //   "kontra8in1.nes": {
 //     "flavor": "kontra8in1", "title": "Контра: Сборник",
 //     "menuAlign": "left",   // выравнивание меню: left|center|right (по умолчанию center)
+//     "menuOffsetX": 0.25,    // сдвиг блока меню от menuAlign, доля ширины экрана (-1..1, 0.25 = 25% вправо; по умолчанию 0)
 //     "games": [
 //       { "file": "25_Contra.nes",       "title": "Контра" },
 //       { "file": "24_Super_Contra.nes", "title": "Супер Контра" }
@@ -88,7 +89,8 @@ data class GameSpec(
     val versionCode: Int,
     val versionName: String,
     val collection: List<CollectionGame>?, // != null — flavor-сборник «X in 1»
-    val menuAlign: String                  // выравнивание меню сборника: left|center|right
+    val menuAlign: String,                 // выравнивание меню сборника: left|center|right
+    val menuOffsetX: Double                // сдвиг блока меню от menuAlign, доля ширины экрана (-1..1, по умолчанию 0)
 )
 
 // Массив "games" в записи games.json — сборник. Каждый элемент: {"file":
@@ -171,6 +173,25 @@ private fun parseMenuAlign(o: Map<*, *>, name: String): String {
     return raw
 }
 
+// Горизонтальный сдвиг блока меню сборника (menuOffsetX): число в долях
+// ширины экрана (-1..1), добавляется к позиции menuAlign (0.25 = 25% вправо).
+// По умолчанию 0 (сдвига нет). Ошибки — GradleException, чтобы упасть сразу в сборке.
+private fun parseMenuOffsetX(o: Map<*, *>, name: String): Double {
+    val raw = o["menuOffsetX"] ?: return 0.0
+    if (raw !is Number) {
+        throw GradleException(
+            "roms/games.json [$name]: menuOffsetX должен быть числом (-1..1), получено: $raw"
+        )
+    }
+    val value = raw.toDouble()
+    if (value < -1.0 || value > 1.0) {
+        throw GradleException(
+            "roms/games.json [$name]: menuOffsetX должен быть в диапазоне -1..1 (доля ширины экрана), получено: $value"
+        )
+    }
+    return value
+}
+
 fun sanitizeFlavorName(raw: String): String {
     val cleaned = raw.lowercase().filter { it in 'a'..'z' || it in '0'..'9' }
     // applicationId-сегмент не может начинаться с цифры и не может быть пустым
@@ -244,7 +265,8 @@ val gameSpecs: List<GameSpec> = run {
             name, if (collection.isEmpty()) romFile else null, flavor, title,
             parseVersionCode(o, name), parseVersionName(o, name),
             if (collection.isEmpty()) null else collection,
-            parseMenuAlign(o, name)
+            parseMenuAlign(o, name),
+            parseMenuOffsetX(o, name)
         )
     }
     val dup = specs.groupBy { it.flavor }.filterValues { it.size > 1 }.keys
@@ -556,6 +578,7 @@ gameSpecs.forEach { spec ->
                 if (!spec.title.isNullOrBlank()) manifest.append("\"title\":\"${esc(spec.title)}\",")
                 if (bgName != null) manifest.append("\"background\":\"$bgName\",")
                 if (spec.menuAlign != "center") manifest.append("\"menuAlign\":\"${spec.menuAlign}\",")
+                if (spec.menuOffsetX != 0.0) manifest.append("\"menuOffsetX\":${JsonOutput.toJson(spec.menuOffsetX)},")
                 manifest.append("\"games\":[")
                 spec.collection.forEachIndexed { i, g ->
                     val dst = gamesDir.resolve("$i.${g.file.extension.lowercase()}")
