@@ -8,31 +8,42 @@
 aspect ratio, находит в видимом окне наименее «занятую» полосу шириной блока
 и печатает menuOffsetX (доля ширины экрана, -1..1) на stdout (одна строка).
 
-«Занятый» пиксель: высокая насыщенность (sat > 0.35) или высокая яркость
-(lum > 150) — под тёмным блоком меню такие пиксели хуже всего читаются,
-поэтому блок двигается туда, где постера меньше всего. Если центр и так
-почти оптимальен (разница < --eps) — печатает 0.0 (манифест без смещения).
-Детальная строка (# busy …) идёт в stderr.
+Метрика «занятости» колонки — текстура: среднее |разность яркости по
+вертикали| в колонке, нормированное к медиане по окну. Это «видит» контуры
+фигур при любой освещённости: яркие, тёмные, малонасыщенные (Shredder на
+тёмном фоне). Только насыщение+яркость (версия 84532b1) тёмные фигуры не
+видела и двигала блок на них (регрессия 01.11: авто-0.244 накрыло Шреддера,
+Nikas зафиксировал 0.12 вручную); только текстура возвращает блок к пустому
+центру (+0.096 на tmnt-постере — в «самый раз» 0.10–0.12).
+Отбор позиции: скользящее окно шириной блока, минимизация суммарной
+текстуры; среди позиций в пределах --tie (2%) от лучшей берётся СЕРЕДНЯЯ
+(среднее мин/макс кластера «равноценных»): на плоском дне провала
+(+0.08…+0.15 на tmnt-постере) — его середина +0.11, а не ближайший к
+якорю край; если якорь и так почти оптимален (улучшение < --eps) —
+печатает 0.0 (как у contra3in1 с menuAlign=left — левая половина постера
+и так наименее занятая).
+Детальная строка (# texture …) идёт в stderr.
 
 Запуск вручную:
   python3 scripts/pick_menu_offset.py metadata/tmnt4in1/background.png
   python3 scripts/pick_menu_offset.py metadata/tmnt4in1/background.png \
-      --aspect 2.333 --block-frac 0.32 --max-offset 0.30
+      --aspect 2.333 --block-frac 0.32 --max-offset 0.15 --align center
 
 Из build.gradle.kts вызывается автоматически при сборке flavor-сборника,
-у которого в roms/games.json НЕ задан menuOffsetX явно: результат
-подставляется в манифест assets/games/games.json. Явное значение из
+у которого в roms/games.json НЕ задан menuOffsetX явно (и menuAlign=center):
+результат подставляется в манифест assets/games/games.json. Явное значение из
 roms/games.json всегда побеждает. Нужен python3 + Pillow.
 """
 
 import argparse
+import statistics
 import sys
 
 
 def crop_window(poster_w: float, poster_h: float, aspect: float):
     """Часть постера, видимая при ContentScale.Crop на экран шириной/высотой = aspect.
 
-    Координаты в единицах постера: (x0, y0, vis_w, vis_h).
+    Координаты в пикселях исходного постера: (x0, y0, vis_w, vis_h).
     """
     scale = max(aspect / poster_w, 1.0 / poster_h)
     vis_w = aspect / scale
@@ -46,13 +57,15 @@ def main() -> None:
     ap.add_argument("--aspect", type=float, default=19.5 / 9,
                     help="ширина/высота экрана, альбомная ориентация (по умолчанию 19.5:9 = 2.167; 21:9 = 2.333)")
     ap.add_argument("--block-frac", type=float, default=0.32,
-                    help="ширина блока меню в долях ширины экрана (по умолчанию 0.32: ширина самой длинной плашки на типичном FHD+ альбоме)")
+                    help="ширина блока меню в долях ширины экрана (по умолчанию 0.32: самая длинная плашка на типичном FHD+ альбоме)")
+    ap.add_argument("--max-offset", type=float, default=0.15,
+                    help="предельное смещение, доля ширины (по умолчанию 0.15 — консервативно: большие сдвиги рискуют наехать на фигуры)")
     ap.add_argument("--align", choices=("center", "left", "right"), default="center",
                     help="menuAlign flavor'а (по умолчанию center): от этого якоря считается смещение")
-    ap.add_argument("--max-offset", type=float, default=0.30,
-                    help="предельное смещение, доля ширины (по умолчанию 0.30)")
     ap.add_argument("--eps", type=float, default=0.02,
-                    help="минимальное улучшение к busyness центра, чтобы двигать блок (по умолчанию 0.02)")
+                    help="минимальное улучшение к занятому якоря, чтобы двигать блок (по умолчанию 0.02)")
+    ap.add_argument("--tie", type=float, default=0.02,
+                    help="доля от лучшего счёта, в пределах которой позиции считаются равноценными: берётся середина этого кластера (по умолчанию 0.02: узкое дно провала; широкие окна, типа 15%%, на постерах с ровным дном тянут и якорь 0.0)")
     args = ap.parse_args()
 
     from PIL import Image
@@ -64,33 +77,39 @@ def main() -> None:
     w, h = im.size
     px = im.load()
 
+    # Видимое окно Crop (в пикселях исходного постера → перевод в размер после даунсэмпла)
     x0, y0, vw, vh = crop_window(pw, ph, args.aspect)
-    # Координаты окна в пикселях ИСХОДНОГО постера — переводим в размер после даунсэмпла
     sx, sy = w / pw, h / ph
     X0, X1 = max(0, round(x0 * sx)), min(w, max(1, round((x0 + vw) * sx)))
     Y0, Y1 = max(0, round(y0 * sy)), min(h, max(1, round((y0 + vh) * sy)))
     if X1 <= X0 or Y1 <= Y0:
         X0, X1, Y0, Y1 = 0, w, 0, h  # вырожденное окно — весь постер
+    cols, rows = X1 - X0, Y1 - Y0
 
-    # По вертикальным столбцам в видимом окне — доля «занятых» пикселей
-    cols = []
-    for x in range(X0, X1):
-        busy = 0
-        for y in range(Y0, Y1):
+    # --- Профиль текстуры по колонкам окна ---
+    # |разность яркости по вертикали| — контуры фигур при любой освещённости
+    cols, rows = X1 - X0, Y1 - Y0
+    lum_col = [[0.0] * cols for _ in range(rows)]
+    for y in range(Y0, Y1):
+        for x in range(X0, X1):
             r, g, b = px[x, y]
-            mx, mn = max(r, g, b), min(r, g, b)
-            sat = (mx - mn) / mx if mx else 0.0
-            lum = 0.299 * r + 0.587 * g + 0.114 * b
-            if sat > 0.35 or lum > 150:
-                busy += 1
-        cols.append(busy / (Y1 - Y0))
-    n = len(cols)
+            lum_col[y - Y0][x - X0] = 0.299 * r + 0.587 * g + 0.114 * b
+    detail = [0.0] * cols
+    for x in range(cols):
+        d = 0
+        for y in range(rows - 1):
+            d += abs(lum_col[y + 1][x] - lum_col[y][x])
+        detail[x] = d / max(1, rows - 1)
+    med_det = statistics.median(detail) if cols else 0.0
+    # Нормировка к медиане: > медианной текстуры — «зачёркнуто» (сигнал
+    # насыщенности/яркости не добавлен намеренно: яркая/цветная плоская
+    # зона — НЕ фигура, и тёмный блок на ней читается лучше всего)
+    interest = [min(1.0, d / med_det) if med_det else 0.0 for d in detail]
 
-    # Скользящее окно шириной блока: суммарный busyness под блоком.
-    # «Текущая» позиция блока — по menuAlign-якорю (left — блок прижат влево:
-    # центр в block_frac/2; right — симметрично; center — 0.5)
+    # --- Скользящее окно шириной блока: суммарная занятость под блоком ---
+    n = cols
     pref = [0.0] * (n + 1)
-    for i, v in enumerate(cols):
+    for i, v in enumerate(interest):
         pref[i + 1] = pref[i] + v
     bw = min(n, max(1, round(args.block_frac * n)))
 
@@ -101,20 +120,27 @@ def main() -> None:
     anchor_center = {"center": 0.5, "left": args.block_frac / 2, "right": 1 - args.block_frac / 2}[args.align]
     anchor_i = round(anchor_center * n - bw / 2)
     anchor_score = window_score(anchor_i)
-    best_score, best_pos = anchor_score, anchor_center
+
+    best_score = anchor_score
     for i in range(n - bw + 1):
         s = window_score(i)
         if s < best_score:
-            best_score, best_pos = s, (i + bw / 2) / n
+            best_score = s
+    # Среди позиций «так же хороших» (в пределах --tie от лучшего) — середина
+    # кластера (не ближайший к якорю край и не одиночный минимум): на
+    # плоском дне провала даёт его середину — устойчиво и не прилипает к якорю
+    cands = [((i + bw / 2) / n) for i in range(n - bw + 1)
+             if window_score(i) <= best_score * (1 + args.tie)]
+    best_pos = (min(cands) + max(cands)) / 2
 
     if anchor_score - best_score < args.eps:
         offset = 0.0
     else:
         offset = round(max(-args.max_offset, min(args.max_offset, best_pos - anchor_center)), 3)
 
-    print(f"# busy: позиция {args.align} {anchor_score:.3f} → лучшее {best_score:.3f} "
+    print(f"# texture: позиция {args.align} {anchor_score:.3f} → лучшее {best_score:.3f} "
           f"(центр окна {best_pos:.3f}) | окно postera x {x0:.2f}..{x0 + vw:.2f}, "
-          f"y {y0:.2f}..{y0 + vh:.2f} (aspect {args.aspect:.3f})", file=sys.stderr)
+          f"y {y0:.2f}..{y0 + vh:.2f} (aspect {args.aspect:.3f}, texture-only)", file=sys.stderr)
     print(offset)
 
 
