@@ -19,20 +19,14 @@
     "title": "Контра",
     "menuAlign": "left",
     "games": [
-      { "file": "c_contra.nes",       "title": "Контра",
-        "combos": [
-          { "name": "Автоогонь", "steps": [ { "b": "B", "d": 0, "h": 500 } ] }
-        ]
+      { "file": "c_contra.nes",       
+        "title": "Контра"
       },
-      { "file": "c_super_contra.nes", "title": "Супер Контра",
-        "combos": [
-          { "name": "Автоогонь", "steps": [ { "b": "B", "d": 0, "h": 500 } ] }
-        ]
+      { "file": "c_super_contra.nes", 
+        "title": "Супер Контра"
       },
-      { "file": "c_contra_force.nes",    "title": "Контра Форс",
-        "combos": [
-          { "name": "Автоогонь", "steps": [ { "b": "B", "d": 0, "h": 500 } ] }
-        ]
+      { "file": "c_contra_force.nes",    
+        "title": "Контра Форс"
       }
     ]
   },
