@@ -158,6 +158,13 @@ object ControlSkins {
      */
     val ALL: List<ControlSkin> = listOf(classic(), gadget(), console())
 
+    /**
+     * Все валидные id одним набором — источник для валидации сохранённого
+     * выбора в настройках (SettingsCore): список держится здесь, в реестре,
+     * и не может рассинхронизироваться при добавлении скина.
+     */
+    val IDS: Set<String> = ALL.map { it.id }.toSet()
+
     /** Классический скин (= дефолт). */
     val DEFAULT: ControlSkin get() = byId(DEFAULT_ID)
 

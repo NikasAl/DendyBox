@@ -46,6 +46,7 @@ import com.dendybox.app.settings.GameConfig
 import com.dendybox.app.settings.SettingsStore
 import com.dendybox.app.ui.DendyBoxTheme
 import com.dendybox.app.ui.controls.ComboStore
+import com.dendybox.app.ui.controls.ControlSkins
 import com.dendybox.app.ui.screens.CollectionMenu
 import com.dendybox.app.ui.screens.GameScreen
 import com.dendybox.app.ui.screens.Screen
@@ -110,7 +111,10 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AppRoot() {
     val context = LocalContext.current
-    SettingsStore.init(context)
+    // Набор валидных id скинов — из реестра ControlSkins: валидатор сохранённого
+    // выбора (SettingsCore) нормализует только id удалённых скинов, живой id
+    // (гаджет/приставка) обязан переживать рестарт
+    SettingsStore.init(context, ControlSkins.IDS)
     // Хранилище СВОИХ комбо-кнопок (секции по играм сборника; пресеты —
     // в GameConfig из roms/<flavor>.json / roms/games.json)
     ComboStore.init(context)
