@@ -2,6 +2,7 @@ package com.dendybox.app.settings
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.dendybox.app.ui.controls.ControlSkins
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -16,11 +17,10 @@ object SettingsStore {
     val haptics = MutableStateFlow(true)      // вибрация при уроне (если игра задаёт байт урона)
     val dpadSize = MutableStateFlow(58f)      // радиус крестовины, dp
     val controlsOpacity = MutableStateFlow(0.55f) // общая видимость контролов: заливки, рамки, крестовина, подписи
-    // Скин кнопок: идентификатор из ControlSkins (classic | gadget — набор
-    // сокращён до двух). Строка хранится здесь, ресолв в ControlSkin —
-    // в ui.controls (byId), чтобы настройки не зависели от UI-слоя.
-    // КОРПУС — часть скина: у «Гаджета» он есть, у остальных нет (ресолв —
-    // DeviceSkins.forControlSkin в ui.controls); отдельной настройки корпуса нет.
+    // Скин кнопок: идентификатор из ControlSkins (classic | gadget | console).
+    // Строка хранится здесь, отрисовка — через ControlSkins.byId в ui.controls;
+    // валидация набора id при старте берётся из реестра ControlSkins.ALL
+    // (единый источник правды — хардкод валидатора больше не отстаёт от UI).
     val controlSkin = MutableStateFlow("classic")
     val twoLocal = MutableStateFlow(false)    // локальный режим «2 игрока» на одном экране
 
@@ -47,14 +47,18 @@ object SettingsStore {
             }
             edit().putString("controlSkin", controlSkin.value).remove("deviceSkin").apply()
         }
-        // Набор скинов сокращён до «Классический»/«Гаджет»: сохранённый id
-        // удалённого скина (неон/пиксель/тёмный/денди/карбон/аркада) заменяется
-        // дефолтом — классикой. byId и так резолвит неизвестный id в классику
-        // при живой отрисовке; здесь же значение вычищается из prefs,
-        // чтобы в настройках не оставался мусор от прежних версий.
-        if (controlSkin.value != "classic" && controlSkin.value != "gadget") {
-            controlSkin.value = "classic"
-            edit().putString("controlSkin", "classic").apply()
+        // Сохранённый id из реестра ControlSkins.ALL (классика/гаджет/приставка)
+        // — как есть; неизвестный (удалённые неон/пиксель/тёмный/денди/карбон/
+        // аркада) — дефолт и вычистка из prefs, чтобы не остался мусор от
+        // прежних версий. Регрессия 04.11: валидатор хардкодил {classic, gadget}
+        // и молча сбрасывал добавленный позже «Приставку» (console) на классику
+        // при каждом старте — теперь набор берётся из реестра.
+        val storedSkin = controlSkin.value
+        val knownSkins = ControlSkins.ALL.mapTo(HashSet()) { it.id }
+        val normalized = normalizeControlSkin(storedSkin, knownSkins)
+        if (normalized != storedSkin) {
+            controlSkin.value = normalized
+            edit().putString("controlSkin", normalized).apply()
         }
     }
 
@@ -65,6 +69,15 @@ object SettingsStore {
     fun setDpadSize(v: Float) { dpadSize.value = v; edit().putFloat("dpadSize", v) }
     fun setControlsOpacity(v: Float) { controlsOpacity.value = v; edit().putFloat("controlsOpacity", v) }
     fun setControlSkin(v: String) { controlSkin.value = v; edit().putString("controlSkin", v) }
+
+    /**
+     * Валидация сохранённого id скина: id из [knownIds] — как есть, иначе дефолт
+     * (классика). Чистая функция — инициализация передаёт актуальный набор из
+     * ControlSkins.ALL, юнит-тесты — произвольные.
+     * @return нормализованный id
+     */
+    fun normalizeControlSkin(stored: String, knownIds: Set<String>): String =
+        if (stored in knownIds) stored else ControlSkins.DEFAULT_ID
     fun setTwoLocal(v: Boolean) { twoLocal.value = v; edit().putBoolean("twoLocal", v) }
 
     private fun edit() = prefs.edit()
